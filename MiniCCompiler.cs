@@ -11,11 +11,15 @@ namespace MiniOS
     /// </summary>
     public static class MiniCCompiler
     {
-        public static MiniCProgram Compile(string source)
+        public static MiniCProgram Compile(string source, MiniCCompilationOptions? options = null)
         {
             if (string.IsNullOrWhiteSpace(source))
                 throw new MiniCCompileException("C source is empty");
-            var parser = new MiniCParser(source);
+            var includeResolver = options?.IncludeResolver ?? MiniCIncludeResolver.Host;
+            var sourcePath = options?.SourcePath;
+            var preprocessor = new MiniCPreprocessor(includeResolver);
+            var processed = preprocessor.Process(source, sourcePath);
+            var parser = new MiniCParser(processed);
             return parser.ParseProgram();
         }
     }
@@ -778,17 +782,18 @@ namespace MiniOS
         public override MiniCLValue GetReference(MiniCEvalContext ctx)
         {
             var variable = ctx.ResolveVariable(Name);
-            if (!variable.IsArray) throw new MiniCRuntimeException($"Variable '{Name}' is not an array");
             var idx = Index.Evaluate(ctx).AsInt();
-            return new MiniCLValue(ctx, variable, idx);
+            if (variable.IsArray)
+                return new MiniCLValue(ctx, variable, idx);
+            if (variable.Type.IsPointer)
+            {
+                var pointer = variable.GetValue().AsPointer();
+                return new MiniCLValue(ctx, pointer.Offset(idx));
+            }
+            throw new MiniCRuntimeException($"Variable '{Name}' is not an array");
         }
         public override MiniCValue Evaluate(MiniCEvalContext ctx)
-        {
-            var variable = ctx.ResolveVariable(Name);
-            if (!variable.IsArray) throw new MiniCRuntimeException($"Variable '{Name}' is not an array");
-            var idx = Index.Evaluate(ctx).AsInt();
-            return variable.GetArrayElementValue(idx);
-        }
+            => GetReference(ctx).Get();
     }
 
     public sealed record PointerIndexExpr(Expr Pointer, Expr Index) : Expr

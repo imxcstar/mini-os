@@ -11,10 +11,12 @@ namespace MiniOS
         private readonly Scheduler _sched;
         private readonly Terminal _term;
         private readonly ISysApi _sys;
+        private readonly IMiniCIncludeResolver _includeResolver;
 
         public ProgramLoader(Vfs vfs, Scheduler sched, Terminal term, ISysApi sys)
         {
             _vfs = vfs; _sched = sched; _term = term; _sys = sys;
+            _includeResolver = MiniCIncludeResolver.ForVfs(vfs);
         }
 
         public int SpawnProgram(string path, ProcessStartOptions? options = null) => SpawnByPath(path, options);
@@ -27,7 +29,12 @@ namespace MiniOS
             if (path.EndsWith(".c", StringComparison.OrdinalIgnoreCase))
             {
                 var csrc = _vfs.ReadAllText(path);
-                var program = MiniCCompiler.Compile(csrc);
+                var compileOptions = new MiniCCompilationOptions
+                {
+                    IncludeResolver = _includeResolver,
+                    SourcePath = path
+                };
+                var program = MiniCCompiler.Compile(csrc, compileOptions);
                 var memory = new MiniCMemory();
                 var runtime = new MiniCRuntime(program, _sys, memory);
                 var startOptions = new ProcessStartOptions

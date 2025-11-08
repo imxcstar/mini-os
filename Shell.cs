@@ -69,7 +69,12 @@ namespace MiniOS
                         if (args.Length < 1) { _term.WriteLine("compile <in.c>"); return true; }
                         var inPath = Resolve(args[0]);
                         var csrc = _vfs.ReadAllText(inPath);
-                        MiniCCompiler.Compile(csrc);
+                        var options = new MiniCCompilationOptions
+                        {
+                            IncludeResolver = MiniCIncludeResolver.ForVfs(_vfs),
+                            SourcePath = inPath
+                        };
+                        MiniCCompiler.Compile(csrc, options);
                         _term.WriteLine("MiniC compilation succeeded");
                         return true;
                     }

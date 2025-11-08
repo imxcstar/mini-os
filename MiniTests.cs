@@ -15,6 +15,7 @@ public static class MiniTests
         {
             ("VfsOperations", () => Task.Run(TestVfsOperations)),
             ("MiniCStringRuntime", () => Task.Run(TestMiniCRuntimeFeatures)),
+            ("MiniCIncludeSupport", () => Task.Run(TestMiniCIncludeResolution)),
             ("ViWorkflow", () => Task.Run(TestViWorkflow))
         };
 
@@ -92,11 +93,11 @@ int main(void) {
     char* info = malloc(32);
     stat(""/home/user/a.txt"", info);
     printf(""stat:%d:%d\n"", load32(info, 0), load32(info, 8));
-    dump_dir(""/home/user"");
     int fd = open(""/home/user/out.txt"", FLAG_WRITE + FLAG_CREATE + FLAG_TRUNC);
     char* message = ""hello"";
     write(fd, message, strlen(message));
     close(fd);
+    dump_dir(""/home/user"");
     fd = open(""/home/user/out.txt"", FLAG_READ);
     char* buf = malloc(16);
     int count = read(fd, buf, 5);
@@ -127,6 +128,36 @@ int main(void) {
         runtime.Run(CancellationToken.None);
         var saved = vfs.ReadAllText("/home/user/vi-test.txt");
         AssertEqual("hello world", saved.TrimEnd('\n', '\r'), "vi saved content mismatch");
+    }
+
+    private static void TestMiniCIncludeResolution()
+    {
+        var (vfs, api, _) = CreateSystem();
+        vfs.EnsureDirectory("/home/user/lib");
+        vfs.WriteAllText("/home/user/lib/constants.h", @"int BASE_VALUE = 40;");
+        var commonHeader = @"#include ""constants.h""
+
+int compute_answer(void)
+{
+    return BASE_VALUE + 2;
+}";
+        vfs.WriteAllText("/home/user/lib/common.h", commonHeader);
+        var programSource = @"#include ""lib/common.h""
+
+int main(void)
+{
+    return compute_answer();
+}";
+        vfs.WriteAllText("/home/user/app.c", programSource);
+        var options = new MiniCCompilationOptions
+        {
+            IncludeResolver = MiniCIncludeResolver.ForVfs(vfs),
+            SourcePath = "/home/user/app.c"
+        };
+        var program = MiniCCompiler.Compile(programSource, options);
+        var runtime = new MiniCRuntime(program, api);
+        var exit = runtime.Run(CancellationToken.None);
+        Assert(exit == 42, "include processing should allow nested headers in the virtual filesystem");
     }
 
     private static (Vfs vfs, ISysApi api, TestTerminal term) CreateSystem()
