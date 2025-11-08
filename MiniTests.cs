@@ -121,7 +121,8 @@ int main(void) {
     private static void TestViWorkflow()
     {
         var (vfs, api, term) = CreateSystem();
-        term.EnqueueInputs("/home/user/vi-test.txt", ":i", "hello world", ".", ":w", ":q");
+        term.EnqueueInputs("/home/user/vi-test.txt");
+        term.EnqueueKeySequence("ihello world\x1b:w\n:q\n");
         var viPath = Rootfs.ResolveHostPath("bin/vi.c");
         var viSource = File.ReadAllText(viPath);
         var program = MiniCCompiler.Compile(viSource);
@@ -213,11 +214,29 @@ int main(void)
     {
         private readonly Queue<string> _inputs = new();
         private readonly Queue<char> _charQueue = new();
+        private readonly Queue<int> _keys = new();
         private readonly StringBuilder _output = new();
+        private int _cursorCol;
+        private int _cursorRow;
+        private bool _cursorVisible = true;
+        private readonly int _width = 80;
+        private readonly int _height = 24;
 
         public void EnqueueInputs(params string[] lines)
         {
             foreach (var line in lines) _inputs.Enqueue(line);
+        }
+
+        public void EnqueueKeySequence(string sequence)
+        {
+            foreach (var ch in sequence)
+                _keys.Enqueue(ch);
+        }
+
+        public void EnqueueKeyCodes(params int[] codes)
+        {
+            foreach (var code in codes)
+                _keys.Enqueue(code);
         }
 
         public string Output => _output.ToString();
@@ -240,8 +259,33 @@ int main(void)
             return _charQueue.Count == 0 ? -1 : _charQueue.Dequeue();
         }
 
+        public override int ReadKey()
+        {
+            if (_keys.Count == 0)
+                return ReadChar();
+            return _keys.Dequeue();
+        }
+
         public override void Write(string s) => _output.Append(s);
         public override void WriteLine(string s = "") => _output.AppendLine(s);
         public override void Prompt(string cwd) => _output.Append($"[{cwd}]$ ");
+
+        public override void Clear()
+        {
+            _cursorCol = 0;
+            _cursorRow = 0;
+        }
+
+        public override void SetCursorPosition(int column, int row)
+        {
+            _cursorCol = column;
+            _cursorRow = row;
+        }
+
+        public override int CursorColumn => _cursorCol;
+        public override int CursorRow => _cursorRow;
+        public override int ConsoleWidth => _width;
+        public override int ConsoleHeight => _height;
+        public override void SetCursorVisible(bool visible) => _cursorVisible = visible;
     }
 }

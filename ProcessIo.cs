@@ -6,6 +6,7 @@ namespace MiniOS
     {
         int ReadChar();
         string ReadLine();
+        int ReadKey();
     }
 
     public interface IOutputPipe
@@ -72,6 +73,12 @@ namespace MiniOS
             AwaitForeground();
             return _terminal.ReadLine() ?? string.Empty;
         }
+
+        public int ReadKey()
+        {
+            AwaitForeground();
+            return _terminal.ReadKey();
+        }
     }
 
     internal sealed class TerminalOutputPipe : IOutputPipe
@@ -93,6 +100,7 @@ namespace MiniOS
 
         public int ReadChar() => -1;
         public string ReadLine() => string.Empty;
+        public int ReadKey() => -1;
     }
 
     internal sealed class NullOutputPipe : IOutputPipe

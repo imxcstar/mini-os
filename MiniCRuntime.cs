@@ -672,6 +672,7 @@ namespace MiniOS
             ["readall"] = ReadAll,
             ["writeall"] = WriteAll,
             ["readln"] = ReadLine,
+            ["readkey"] = ReadKey,
             ["spawn"] = Spawn,
             ["wait"] = Wait,
             ["proc_count"] = ProcCount,
@@ -681,6 +682,14 @@ namespace MiniOS
             ["proc_mem"] = ProcMemory,
             ["proc_kill"] = ProcKill,
             ["input"] = Input,
+            ["console_clear"] = ConsoleClear,
+            ["console_set_cursor"] = ConsoleSetCursor,
+            ["console_cursor_col"] = ConsoleCursorCol,
+            ["console_cursor_row"] = ConsoleCursorRow,
+            ["console_width"] = ConsoleWidth,
+            ["console_height"] = ConsoleHeight,
+            ["console_show_cursor"] = ConsoleShowCursor,
+            ["keycode"] = KeyCode,
             ["rename"] = Rename,
             ["argc"] = ArgCount,
             ["argv"] = ArgValue,
@@ -1028,6 +1037,82 @@ namespace MiniOS
         {
             if (args.Count != 0) throw new MiniCRuntimeException("readln expects no args");
             return MiniCValue.FromString(ctx.Sys.ReadLine());
+        }
+
+        private static MiniCValue ReadKey(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("readkey expects no args");
+            return MiniCValue.FromInt(ctx.Sys.ReadKey());
+        }
+
+        private static MiniCValue ConsoleClear(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("console_clear expects no args");
+            ctx.Sys.ClearConsole();
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue ConsoleSetCursor(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("console_set_cursor expects 2 args");
+            ctx.Sys.SetCursorPosition(args[0].AsInt(), args[1].AsInt());
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue ConsoleCursorCol(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("console_cursor_col expects no args");
+            return MiniCValue.FromInt(ctx.Sys.GetCursorColumn());
+        }
+
+        private static MiniCValue ConsoleCursorRow(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("console_cursor_row expects no args");
+            return MiniCValue.FromInt(ctx.Sys.GetCursorRow());
+        }
+
+        private static MiniCValue ConsoleWidth(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("console_width expects no args");
+            return MiniCValue.FromInt(ctx.Sys.GetConsoleWidth());
+        }
+
+        private static MiniCValue ConsoleHeight(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("console_height expects no args");
+            return MiniCValue.FromInt(ctx.Sys.GetConsoleHeight());
+        }
+
+        private static MiniCValue ConsoleShowCursor(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("console_show_cursor expects 1 arg");
+            ctx.Sys.SetCursorVisible(args[0].AsInt() != 0);
+            return MiniCValue.FromInt(0);
+        }
+
+        private static readonly Dictionary<string, int> _keyCodes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["up"] = TerminalKeyCodes.ArrowUp,
+            ["down"] = TerminalKeyCodes.ArrowDown,
+            ["left"] = TerminalKeyCodes.ArrowLeft,
+            ["right"] = TerminalKeyCodes.ArrowRight,
+            ["home"] = TerminalKeyCodes.Home,
+            ["end"] = TerminalKeyCodes.End,
+            ["pageup"] = TerminalKeyCodes.PageUp,
+            ["pagedown"] = TerminalKeyCodes.PageDown,
+            ["delete"] = TerminalKeyCodes.Delete,
+            ["enter"] = TerminalKeyCodes.Enter,
+            ["escape"] = TerminalKeyCodes.Escape,
+            ["esc"] = TerminalKeyCodes.Escape,
+            ["tab"] = TerminalKeyCodes.Tab,
+            ["backspace"] = TerminalKeyCodes.Backspace
+        };
+
+        private static MiniCValue KeyCode(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("keycode expects 1 arg");
+            var name = args[0].AsString();
+            return MiniCValue.FromInt(_keyCodes.TryGetValue(name, out var value) ? value : -1);
         }
 
         private static MiniCValue Spawn(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)

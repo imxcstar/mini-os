@@ -114,6 +114,14 @@ namespace MiniOS
         public void PrintLine(string text = "") => GetStdOut().WriteLine(text);
         public int ReadChar() => GetStdIn().ReadChar();
         public string ReadLine() => GetStdIn().ReadLine();
+        public int ReadKey() => GetStdIn().ReadKey();
+        public void ClearConsole() => _term.Clear();
+        public void SetCursorPosition(int column, int row) => _term.SetCursorPosition(column, row);
+        public int GetCursorColumn() => _term.CursorColumn;
+        public int GetCursorRow() => _term.CursorRow;
+        public int GetConsoleWidth() => _term.ConsoleWidth;
+        public int GetConsoleHeight() => _term.ConsoleHeight;
+        public void SetCursorVisible(bool visible) => _term.SetCursorVisible(visible);
         public string Input(string prompt = "")
         {
             if (!string.IsNullOrEmpty(prompt))
@@ -210,6 +218,7 @@ namespace MiniOS
 
             public int ReadChar() => _terminal.ReadChar();
             public string ReadLine() => _terminal.ReadLine() ?? string.Empty;
+            public int ReadKey() => _terminal.ReadKey();
         }
     }
 }

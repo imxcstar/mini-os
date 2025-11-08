@@ -26,6 +26,14 @@ namespace MiniOS
         string Input(string prompt = "");
         string GetCwd();
         void SetCwd(string path);
+        int ReadKey();
+        void ClearConsole();
+        void SetCursorPosition(int column, int row);
+        int GetCursorColumn();
+        int GetCursorRow();
+        int GetConsoleWidth();
+        int GetConsoleHeight();
+        void SetCursorVisible(bool visible);
         string ReadAllText(string path);
         byte[] ReadAllBytes(string path);
         void WriteAllText(string path, string text);

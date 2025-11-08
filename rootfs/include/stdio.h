@@ -52,7 +52,18 @@ int clock_ms(void);
 char* readall(char* path);
 int writeall(char* path, char* text);
 char* readln(void);
+/* readkey returns ASCII for printable input or a special code (see keycode). */
+int readkey(void);
 char* input(char* prompt);
+void console_clear(void);
+void console_set_cursor(int col, int row);
+int console_cursor_col(void);
+int console_cursor_row(void);
+int console_width(void);
+int console_height(void);
+void console_show_cursor(int visible);
+/* keycode("up"), keycode("down"), etc expose special key values for readkey. */
+int keycode(char* name);
 
 int spawn(char* path);
 int wait(int pid);
