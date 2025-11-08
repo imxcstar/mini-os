@@ -5,38 +5,29 @@ namespace MiniOS
 {
     /// <summary>
     /// High-level system API that user-space runtimes (MiniC, shell helpers, etc.) can rely on
-    /// without having to speak the raw Brainfuck syscall protocol.
+    /// without depending directly on the console/VFS implementations.
     /// </summary>
-    public class SysApi
+    public interface ISysApi
     {
-        private readonly Syscalls _sys;
-
-        public SysApi(Syscalls sys) => _sys = sys;
-
-        public void Print(string text) => _sys.WriteConsole(text);
-        public void PrintLine(string text = "") => _sys.WriteConsoleLine(text);
-        public int ReadChar() => _sys.ReadConsoleChar();
-        public string ReadLine() => _sys.ReadConsoleLine();
-        public string Input(string prompt = "")
-        {
-            if (!string.IsNullOrEmpty(prompt))
-                _sys.WriteConsole(prompt);
-            return _sys.ReadConsoleLine();
-        }
-        public string ReadAllText(string path) => _sys.ReadText(path);
-        public byte[] ReadAllBytes(string path) => _sys.ReadBytes(path);
-        public void WriteAllText(string path, string text) => _sys.WriteAllText(path, text);
-        public void WriteAllBytes(string path, byte[] data) => _sys.WriteAllBytes(path, data);
-        public IEnumerable<(string name, bool isDir, long size)> ListEntries(string path) => _sys.ListEntries(path);
-        public void Remove(string path) => _sys.RemovePath(path);
-        public void Mkdir(string path) => _sys.MakeDirectory(path);
-        public bool Exists(string path) => _sys.PathExists(path);
-        public void Rename(string path, string newName) => _sys.RenamePath(path, newName);
-        public void Copy(string source, string destination) => _sys.CopyPath(source, destination);
-        public void Move(string source, string destination) => _sys.MovePath(source, destination);
-        public int Spawn(string path) => _sys.SpawnProgram(path);
-        public int Wait(int pid) => _sys.Wait(pid);
-        public uint TimeMilliseconds() => _sys.ClockMilliseconds();
-        public void Sleep(int milliseconds, CancellationToken ct) => _sys.Sleep(milliseconds, ct);
+        void Print(string text);
+        void PrintLine(string text = "");
+        int ReadChar();
+        string ReadLine();
+        string Input(string prompt = "");
+        string ReadAllText(string path);
+        byte[] ReadAllBytes(string path);
+        void WriteAllText(string path, string text);
+        void WriteAllBytes(string path, byte[] data);
+        IEnumerable<(string name, bool isDir, long size)> ListEntries(string path);
+        void Remove(string path);
+        void Mkdir(string path);
+        bool Exists(string path);
+        void Rename(string path, string newName);
+        void Copy(string source, string destination);
+        void Move(string source, string destination);
+        int Spawn(string path);
+        int Wait(int pid);
+        uint TimeMilliseconds();
+        void Sleep(int milliseconds, CancellationToken ct);
     }
 }

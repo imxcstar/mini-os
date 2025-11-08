@@ -9,9 +9,9 @@ namespace MiniOS
         private readonly Vfs _vfs;
         private readonly Scheduler _sched;
         private readonly Terminal _term;
-        private readonly SysApi _sys;
+        private readonly ISysApi _sys;
 
-        public ProgramLoader(Vfs vfs, Scheduler sched, Terminal term, SysApi sys)
+        public ProgramLoader(Vfs vfs, Scheduler sched, Terminal term, ISysApi sys)
         {
             _vfs = vfs; _sched = sched; _term = term; _sys = sys;
         }

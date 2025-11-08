@@ -11,9 +11,9 @@ namespace MiniOS
     public sealed class MiniCRuntime
     {
         private readonly MiniCProgram _program;
-        private readonly SysApi _sys;
+        private readonly ISysApi _sys;
 
-        public MiniCRuntime(MiniCProgram program, SysApi sys)
+        public MiniCRuntime(MiniCProgram program, ISysApi sys)
         {
             _program = program;
             _sys = sys;
@@ -32,12 +32,12 @@ namespace MiniOS
     public sealed class MiniCEvalContext
     {
         private readonly MiniCProgram _program;
-        private readonly SysApi _sys;
+        private readonly ISysApi _sys;
         private readonly CancellationToken _ct;
         private readonly Stack<MiniCStackFrame> _frames = new();
         private readonly Dictionary<string, MiniCVariable> _globals = new(StringComparer.Ordinal);
 
-        public MiniCEvalContext(MiniCProgram program, SysApi sys, CancellationToken ct)
+        public MiniCEvalContext(MiniCProgram program, ISysApi sys, CancellationToken ct)
         {
             _program = program;
             _sys = sys;
@@ -45,7 +45,7 @@ namespace MiniOS
             InitializeGlobals();
         }
 
-        public SysApi Sys => _sys;
+        public ISysApi Sys => _sys;
         public CancellationToken CancellationToken => _ct;
 
         public MiniCValue CallFunction(string name, IReadOnlyList<MiniCValue> args)

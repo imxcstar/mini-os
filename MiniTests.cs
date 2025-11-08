@@ -102,7 +102,7 @@ int main(void) {
         AssertEqual("hello world", saved.TrimEnd('\n', '\r'), "vi saved content mismatch");
     }
 
-    private static (Vfs vfs, SysApi api, TestTerminal term) CreateSystem()
+    private static (Vfs vfs, ISysApi api, TestTerminal term) CreateSystem()
     {
         var vfs = new Vfs();
         vfs.Mkdir("/home");
@@ -110,8 +110,7 @@ int main(void) {
         var term = new TestTerminal();
         var sched = new Scheduler();
         var syscalls = new Syscalls(vfs, sched, term);
-        var api = new SysApi(syscalls);
-        return (vfs, api, term);
+        return (vfs, syscalls, term);
     }
 
     private static void Assert(bool condition, string message)

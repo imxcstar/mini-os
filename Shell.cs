@@ -75,7 +75,7 @@ namespace MiniOS
             {
                 case "help":
                     _term.WriteLine("Builtins: pwd, cd, ls, cat, echo, write, touch, mkdir, rm, mv, cp, rename, ps, kill, sleep, run, compile, exit");
-                    _term.WriteLine("Run Brainfuck .bf or C .c programs inside the virtual system.");
+                    _term.WriteLine("Run C .c programs inside the virtual system.");
                     return true;
                 case "pwd":
                     _term.WriteLine(_cwd.Path); return true;
