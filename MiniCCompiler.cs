@@ -36,28 +36,37 @@ namespace MiniOS
         public MiniCProgram ParseProgram()
         {
             var functions = new Dictionary<string, MiniCFunction>(StringComparer.Ordinal);
+            var globals = new List<MiniCVarDecl>();
             while (!Check(TokenKind.Eof))
             {
-                var func = ParseFunctionOrPrototype();
-                if (!func.HasBody)
+                var baseType = ParseTypeSpecifier();
+                var declarator = ParseDeclarator(baseType);
+                if (Check(TokenKind.Symbol, "("))
                 {
-                    if (!functions.ContainsKey(func.Name))
-                        functions[func.Name] = func;
-                    continue;
+                    var func = ParseFunctionOrPrototype(baseType, declarator);
+                    if (!func.HasBody)
+                    {
+                        if (!functions.ContainsKey(func.Name))
+                            functions[func.Name] = func;
+                        continue;
+                    }
+                    if (functions.TryGetValue(func.Name, out var existing) && existing.HasBody)
+                        throw Error($"Function '{func.Name}' already defined");
+                    functions[func.Name] = func;
                 }
-                if (functions.TryGetValue(func.Name, out var existing) && existing.HasBody)
-                    throw Error($"Function '{func.Name}' already defined");
-                functions[func.Name] = func;
+                else
+                {
+                    var decls = ParseGlobalDeclaration(baseType, declarator);
+                    globals.AddRange(decls);
+                }
             }
             if (!functions.ContainsKey("main"))
                 throw Error("MiniC program must define int main()");
-            return new MiniCProgram(functions);
+            return new MiniCProgram(functions, globals);
         }
 
-        private MiniCFunction ParseFunctionOrPrototype()
+        private MiniCFunction ParseFunctionOrPrototype(MiniCTypeSpecifier baseType, Declarator declarator)
         {
-            var baseType = ParseTypeSpecifier();
-            var declarator = ParseDeclarator(baseType);
             Expect(TokenKind.Symbol, "(");
             var parameters = ParseParameterList();
             Expect(TokenKind.Symbol, ")");
@@ -69,6 +78,19 @@ namespace MiniOS
 
             var body = ParseBlock();
             return new MiniCFunction(declarator.Name, declarator.ResolveType(), parameters, body, true);
+        }
+
+        private List<MiniCVarDecl> ParseGlobalDeclaration(MiniCTypeSpecifier baseType, Declarator firstDecl)
+        {
+            var decls = new List<MiniCVarDecl>();
+            decls.Add(BuildVarDecl(firstDecl, ParseOptionalInitializer()));
+            while (Match(TokenKind.Symbol, ","))
+            {
+                var decl = ParseDeclarator(baseType);
+                decls.Add(BuildVarDecl(decl, ParseOptionalInitializer()));
+            }
+            Expect(TokenKind.Symbol, ";");
+            return decls;
         }
 
         private BlockStmt ParseBlock()
@@ -90,18 +112,25 @@ namespace MiniOS
             do
             {
                 var decl = ParseDeclarator(baseType);
-                Expr? init = null;
-                if (Match(TokenKind.Symbol, "=")) init = ParseExpression();
-                var resolved = decl.ResolveType();
-                if (resolved.Kind == MiniCTypeKind.Void)
-                    throw Error("Variables of type void are not supported");
-                if (decl.IsArray && resolved.Kind == MiniCTypeKind.String)
-                    throw Error("Arrays of char* are not supported");
-                decls.Add(new MiniCVarDecl(resolved, decl.Name, decl.IsArray, decl.ArrayLength, init));
+                decls.Add(BuildVarDecl(decl, ParseOptionalInitializer()));
             }
             while (Match(TokenKind.Symbol, ","));
             Expect(TokenKind.Symbol, ";");
             return new VarDeclStmt(decls);
+        }
+
+        private Expr? ParseOptionalInitializer()
+        {
+            if (Match(TokenKind.Symbol, "=")) return ParseExpression();
+            return null;
+        }
+
+        private MiniCVarDecl BuildVarDecl(Declarator decl, Expr? init)
+        {
+            var resolved = decl.ResolveType();
+            if (resolved.Kind == MiniCTypeKind.Void)
+                throw Error("Variables of type void are not supported");
+            return new MiniCVarDecl(resolved, decl.Name, decl.IsArray, decl.ArrayLength, init);
         }
 
         private MiniCStatement ParseStatement()
@@ -186,6 +215,7 @@ namespace MiniOS
         private List<MiniCParameter> ParseParameterList()
         {
             var list = new List<MiniCParameter>();
+            if (Check(TokenKind.Symbol, ")")) return list;
             if (MatchKeyword("void") && Check(TokenKind.Symbol, ")")) return list;
             bool more;
             do
@@ -492,7 +522,12 @@ namespace MiniOS
             return tok;
         }
 
-        private MiniCCompileException Error(string message) => new(message);
+        private MiniCCompileException Error(string message)
+        {
+            var token = _current;
+            var context = string.IsNullOrEmpty(token.Text) ? token.Kind.ToString() : token.Text;
+            return new MiniCCompileException($"{message} (at '{context}' pos {token.Position})");
+        }
     }
 
     internal sealed class Tokenizer
@@ -636,11 +671,13 @@ namespace MiniOS
     public sealed class MiniCProgram
     {
         public IReadOnlyDictionary<string, MiniCFunction> Functions { get; }
+        public IReadOnlyList<MiniCVarDecl> Globals { get; }
         public MiniCFunction EntryPoint { get; }
 
-        public MiniCProgram(Dictionary<string, MiniCFunction> functions)
+        public MiniCProgram(Dictionary<string, MiniCFunction> functions, IReadOnlyList<MiniCVarDecl> globals)
         {
             Functions = functions;
+            Globals = globals;
             if (!functions.TryGetValue("main", out var main))
                 throw new MiniCCompileException("main function missing");
             if (!main.HasBody)
@@ -736,7 +773,7 @@ namespace MiniOS
             var variable = ctx.ResolveVariable(Name);
             if (!variable.IsArray) throw new MiniCRuntimeException($"Variable '{Name}' is not an array");
             var idx = Index.Evaluate(ctx).AsInt();
-            return MiniCValue.FromInt(variable.GetArrayElement(idx));
+            return variable.GetArrayElementValue(idx);
         }
     }
 

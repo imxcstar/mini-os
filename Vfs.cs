@@ -45,7 +45,10 @@ namespace MiniOS
         }
         public void Remove(string name)
         {
-            if (!Children.Remove(name)) throw new InvalidOperationException($"No such node {name}");
+            if (!Children.TryGetValue(name, out var node))
+                throw new InvalidOperationException($"No such node {name}");
+            Children.Remove(name);
+            node.Parent = null;
         }
     }
 
@@ -69,6 +72,47 @@ namespace MiniOS
         {
             var (dir, leaf) = ResolveParent(path, cwd);
             dir.Remove(leaf);
+        }
+        public void Rename(string path, string newName, DirectoryNode? cwd = null)
+        {
+            if (string.IsNullOrWhiteSpace(newName))
+                throw new ArgumentException("newName");
+            var (dir, leaf) = ResolveParent(path, cwd);
+            if (!dir.Children.TryGetValue(leaf, out var node))
+                throw new InvalidOperationException($"No such path: {path}");
+            if (dir.Children.ContainsKey(newName))
+                throw new InvalidOperationException($"Target '{newName}' already exists");
+            dir.Remove(leaf);
+            node.Name = newName;
+            dir.Add(node);
+        }
+        public void Move(string source, string destination, DirectoryNode? cwd = null)
+        {
+            var node = Resolve(source, cwd);
+            if (node == _root) throw new InvalidOperationException("Cannot move root");
+            var (destDir, destLeaf) = ResolveParent(destination, cwd);
+            if (destDir == node)
+                throw new InvalidOperationException("Cannot move directory into itself");
+            if (node is DirectoryNode dirNode && IsDescendant(dirNode, destDir))
+                throw new InvalidOperationException("Cannot move directory into its subtree");
+            if (destDir.Children.ContainsKey(destLeaf))
+                throw new InvalidOperationException($"Destination '{destLeaf}' already exists");
+            if (node.Parent is not DirectoryNode parent)
+                throw new InvalidOperationException("Node has no parent");
+            parent.Remove(node.Name);
+            node.Name = destLeaf;
+            destDir.Add(node);
+        }
+        public void Copy(string source, string destination, DirectoryNode? cwd = null)
+        {
+            var node = Resolve(source, cwd);
+            var (destDir, destLeaf) = ResolveParent(destination, cwd);
+            if (node is DirectoryNode dirNode && IsDescendant(dirNode, destDir))
+                throw new InvalidOperationException("Cannot copy directory into its subtree");
+            if (destDir.Children.ContainsKey(destLeaf))
+                throw new InvalidOperationException($"Destination '{destLeaf}' already exists");
+            var clone = CloneNode(node, destLeaf);
+            destDir.Add(clone);
         }
         public void WriteAllText(string path, string text, DirectoryNode? cwd = null)
         {
@@ -107,6 +151,18 @@ namespace MiniOS
             {
                 if (kv.Value is FileNode f) yield return (kv.Key, false, f.Data.LongLength);
                 else yield return (kv.Key, true, 0);
+            }
+        }
+        public bool Exists(string path, DirectoryNode? cwd = null)
+        {
+            try
+            {
+                Resolve(path, cwd);
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
         public DirectoryNode GetCwd(string path, DirectoryNode? cwd = null)
@@ -153,6 +209,35 @@ namespace MiniOS
                 if (part == parts.Last()) return n;
             }
             return cur;
+        }
+
+        private static bool IsDescendant(VNode ancestor, VNode node)
+        {
+            VNode? current = node;
+            while (current != null)
+            {
+                if (current == ancestor) return true;
+                current = current.Parent;
+            }
+            return false;
+        }
+
+        private static VNode CloneNode(VNode node, string name)
+        {
+            if (node is FileNode file)
+            {
+                return new FileNode(name) { Data = file.Data.ToArray() };
+            }
+            if (node is DirectoryNode dir)
+            {
+                var newDir = new DirectoryNode(name);
+                foreach (var child in dir.Children.Values.OrderBy(c => c.Name, StringComparer.Ordinal))
+                {
+                    newDir.Add(CloneNode(child, child.Name));
+                }
+                return newDir;
+            }
+            throw new InvalidOperationException("Unknown node type");
         }
     }
 }

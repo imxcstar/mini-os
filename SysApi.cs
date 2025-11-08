@@ -17,6 +17,12 @@ namespace MiniOS
         public void PrintLine(string text = "") => _sys.WriteConsoleLine(text);
         public int ReadChar() => _sys.ReadConsoleChar();
         public string ReadLine() => _sys.ReadConsoleLine();
+        public string Input(string prompt = "")
+        {
+            if (!string.IsNullOrEmpty(prompt))
+                _sys.WriteConsole(prompt);
+            return _sys.ReadConsoleLine();
+        }
         public string ReadAllText(string path) => _sys.ReadText(path);
         public byte[] ReadAllBytes(string path) => _sys.ReadBytes(path);
         public void WriteAllText(string path, string text) => _sys.WriteAllText(path, text);
@@ -24,6 +30,10 @@ namespace MiniOS
         public IEnumerable<(string name, bool isDir, long size)> ListEntries(string path) => _sys.ListEntries(path);
         public void Remove(string path) => _sys.RemovePath(path);
         public void Mkdir(string path) => _sys.MakeDirectory(path);
+        public bool Exists(string path) => _sys.PathExists(path);
+        public void Rename(string path, string newName) => _sys.RenamePath(path, newName);
+        public void Copy(string source, string destination) => _sys.CopyPath(source, destination);
+        public void Move(string source, string destination) => _sys.MovePath(source, destination);
         public int Spawn(string path) => _sys.SpawnProgram(path);
         public int Wait(int pid) => _sys.Wait(pid);
         public uint TimeMilliseconds() => _sys.ClockMilliseconds();

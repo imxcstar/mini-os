@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using System.Threading;
@@ -34,12 +35,14 @@ namespace MiniOS
         private readonly SysApi _sys;
         private readonly CancellationToken _ct;
         private readonly Stack<MiniCStackFrame> _frames = new();
+        private readonly Dictionary<string, MiniCVariable> _globals = new(StringComparer.Ordinal);
 
         public MiniCEvalContext(MiniCProgram program, SysApi sys, CancellationToken ct)
         {
             _program = program;
             _sys = sys;
             _ct = ct;
+            InitializeGlobals();
         }
 
         public SysApi Sys => _sys;
@@ -106,10 +109,54 @@ namespace MiniOS
 
         public MiniCVariable ResolveVariable(string name)
         {
-            if (_frames.TryPeek(out var frame))
-                return frame.Resolve(name);
+            if (_frames.TryPeek(out var frame) && frame.TryResolve(name, out var variable))
+                return variable!;
+            if (_globals.TryGetValue(name, out var global))
+                return global;
             throw new MiniCRuntimeException($"Variable '{name}' not found");
         }
+
+        private void InitializeGlobals()
+        {
+            foreach (var decl in _program.Globals)
+            {
+                if (_globals.ContainsKey(decl.Name))
+                    throw new MiniCRuntimeException($"Global '{decl.Name}' already defined");
+                var variable = new MiniCVariable(decl.Name, decl.Type, decl.IsArray, decl.ArrayLength);
+                if (decl.IsArray)
+                {
+                    if (decl.Type.Kind == MiniCTypeKind.Char)
+                    {
+                        if (decl.Initializer is StringLiteralExpr literal)
+                            variable.WriteStringToArray(literal.Value);
+                        else if (decl.Initializer != null)
+                        {
+                            var value = EvaluateGlobalInitializer(decl.Initializer);
+                            if (value.Kind != MiniCValueKind.String)
+                                throw new MiniCRuntimeException("Char arrays require string literals");
+                            variable.WriteStringToArray(value.AsString());
+                        }
+                    }
+                    else if (decl.Initializer != null)
+                    {
+                        throw new MiniCRuntimeException("Only char arrays support string initializers");
+                    }
+                }
+                else if (decl.Initializer != null)
+                {
+                    var value = EvaluateGlobalInitializer(decl.Initializer);
+                    AssignValue(variable, value);
+                }
+                _globals[decl.Name] = variable;
+            }
+        }
+
+        private static MiniCValue EvaluateGlobalInitializer(Expr expr) => expr switch
+        {
+            IntLiteralExpr ile => MiniCValue.FromInt(ile.Value),
+            StringLiteralExpr sle => MiniCValue.FromString(sle.Value),
+            _ => throw new MiniCRuntimeException("Global initializers must be literal values")
+        };
 
         public void ExecuteBlock(BlockStmt block)
         {
@@ -301,20 +348,29 @@ namespace MiniOS
             return variable;
         }
 
-        public MiniCVariable Resolve(string name)
+        public bool TryResolve(string name, [MaybeNullWhen(false)] out MiniCVariable? variable)
         {
             for (int i = _scopes.Count - 1; i >= 0; i--)
             {
-                if (_scopes[i].TryGetValue(name, out var variable))
-                    return variable;
+                if (_scopes[i].TryGetValue(name, out variable))
+                    return true;
             }
+            variable = null;
+            return false;
+        }
+
+        public MiniCVariable Resolve(string name)
+        {
+            if (TryResolve(name, out var variable))
+                return variable!;
             throw new MiniCRuntimeException($"Unknown identifier '{name}'");
         }
     }
 
     public sealed class MiniCVariable
     {
-        private readonly int[]? _array;
+        private readonly int[]? _numericArray;
+        private readonly string?[]? _stringArray;
         private MiniCValue _value;
 
         public string Name { get; }
@@ -330,10 +386,18 @@ namespace MiniOS
             if (isArray)
             {
                 if (arrayLength <= 0) throw new MiniCRuntimeException($"Array '{name}' must have positive length");
-                if (!type.IsNumeric && type.Kind != MiniCTypeKind.Char)
-                    throw new MiniCRuntimeException("Only numeric/char arrays supported");
+                if (!type.IsNumeric && type.Kind != MiniCTypeKind.String)
+                    throw new MiniCRuntimeException("Only numeric, char or string arrays supported");
                 ArrayLength = arrayLength;
-                _array = new int[arrayLength];
+                if (type.Kind == MiniCTypeKind.String)
+                {
+                    _stringArray = new string?[arrayLength];
+                    for (int i = 0; i < arrayLength; i++) _stringArray[i] = string.Empty;
+                }
+                else
+                {
+                    _numericArray = new int[arrayLength];
+                }
             }
             else
             {
@@ -359,30 +423,42 @@ namespace MiniOS
             }
             else
             {
-                var intValue = value.Kind == MiniCValueKind.String ? throw new MiniCRuntimeException("Cannot assign string to numeric variable") : value.AsInt();
-                _value = MiniCValue.FromInt(intValue);
+                if (value.Kind == MiniCValueKind.String)
+                    throw new MiniCRuntimeException("Cannot assign string to numeric variable");
+                _value = MiniCValue.FromInt(value.AsInt());
             }
         }
 
-        public int GetArrayElement(int index)
+        public MiniCValue GetArrayElementValue(int index)
         {
-            if (_array is null) throw new MiniCRuntimeException("Variable is not an array");
-            if ((uint)index >= _array.Length) throw new MiniCRuntimeException($"Array index {index} out of range for '{Name}'");
-            return _array[index];
+            EnsureArrayIndex(index);
+            if (_stringArray is not null)
+                return MiniCValue.FromString(_stringArray[index] ?? string.Empty);
+            return MiniCValue.FromInt(_numericArray![index]);
         }
 
-        public void SetArrayElement(int index, int value)
+        public void SetArrayElementValue(int index, MiniCValue value)
         {
-            if (_array is null) throw new MiniCRuntimeException("Variable is not an array");
-            if ((uint)index >= _array.Length) throw new MiniCRuntimeException($"Array index {index} out of range for '{Name}'");
-            _array[index] = Type.Kind == MiniCTypeKind.Char ? (value & 0xFF) : value;
+            EnsureArrayIndex(index);
+            if (_stringArray is not null)
+            {
+                if (value.Kind != MiniCValueKind.String)
+                    throw new MiniCRuntimeException("Expected string assignment");
+                _stringArray[index] = value.AsString();
+                return;
+            }
+            if (value.Kind == MiniCValueKind.String)
+                throw new MiniCRuntimeException("Cannot assign string to numeric array element");
+            var intValue = value.AsInt();
+            _numericArray![index] = Type.Kind == MiniCTypeKind.Char ? (intValue & 0xFF) : intValue;
         }
 
         public string ReadArrayAsString()
         {
-            if (_array is null) throw new MiniCRuntimeException("Variable is not an array");
+            if (_numericArray is null || Type.Kind != MiniCTypeKind.Char)
+                throw new MiniCRuntimeException("Variable is not a char array");
             var sb = new StringBuilder();
-            foreach (var cell in _array)
+            foreach (var cell in _numericArray)
             {
                 if (cell == 0) break;
                 sb.Append((char)cell);
@@ -392,12 +468,20 @@ namespace MiniOS
 
         public void WriteStringToArray(string value)
         {
-            if (_array is null) throw new MiniCRuntimeException("Variable is not an array");
-            var len = Math.Min(value.Length, _array.Length > 0 ? _array.Length - 1 : 0);
+            if (_numericArray is null || Type.Kind != MiniCTypeKind.Char)
+                throw new MiniCRuntimeException("Variable is not a char array");
+            var len = Math.Min(value.Length, _numericArray.Length > 0 ? _numericArray.Length - 1 : 0);
             int i = 0;
-            for (; i < len; i++) _array[i] = value[i];
-            if (_array.Length > 0) _array[len] = 0;
-            for (int j = len + 1; j < _array.Length; j++) _array[j] = 0;
+            for (; i < len; i++) _numericArray[i] = value[i];
+            if (_numericArray.Length > 0) _numericArray[len] = 0;
+            for (int j = len + 1; j < _numericArray.Length; j++) _numericArray[j] = 0;
+        }
+
+        private void EnsureArrayIndex(int index)
+        {
+            if (!IsArray) throw new MiniCRuntimeException("Variable is not an array");
+            if ((uint)index >= (uint)ArrayLength)
+                throw new MiniCRuntimeException($"Array index {index} out of range for '{Name}'");
         }
     }
 
@@ -415,7 +499,7 @@ namespace MiniOS
         public MiniCValue Get()
         {
             if (_index.HasValue)
-                return MiniCValue.FromInt(_variable.GetArrayElement(_index.Value));
+                return _variable.GetArrayElementValue(_index.Value);
             return _variable.GetValue();
         }
 
@@ -423,7 +507,7 @@ namespace MiniOS
         {
             if (_index.HasValue)
             {
-                _variable.SetArrayElement(_index.Value, value.AsInt());
+                _variable.SetArrayElementValue(_index.Value, value);
             }
             else
             {
@@ -506,7 +590,17 @@ namespace MiniOS
             ["writeall"] = WriteAll,
             ["readln"] = ReadLine,
             ["spawn"] = Spawn,
-            ["wait"] = Wait
+            ["wait"] = Wait,
+            ["input"] = Input,
+            ["rename"] = Rename,
+            ["copy"] = Copy,
+            ["move"] = Move,
+            ["strlen"] = StrLen,
+            ["strchar"] = StrChar,
+            ["substr"] = SubStr,
+            ["strcat"] = StrCat,
+            ["startswith"] = StartsWith,
+            ["exists"] = Exists
         };
 
         public static bool TryInvoke(string name, MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args, out MiniCValue value)
@@ -620,6 +714,82 @@ namespace MiniOS
             if (args.Count != 1) throw new MiniCRuntimeException("wait expects pid");
             var exit = ctx.Sys.Wait(args[0].AsInt());
             return MiniCValue.FromInt(exit);
+        }
+
+        private static MiniCValue Input(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count > 1) throw new MiniCRuntimeException("input expects optional prompt");
+            var prompt = args.Count == 1 ? args[0].AsString() : string.Empty;
+            return MiniCValue.FromString(ctx.Sys.Input(prompt));
+        }
+
+        private static MiniCValue Rename(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("rename expects source and new name");
+            ctx.Sys.Rename(args[0].AsString(), args[1].AsString());
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue Copy(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("copy expects source and destination");
+            ctx.Sys.Copy(args[0].AsString(), args[1].AsString());
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue Move(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("move expects source and destination");
+            ctx.Sys.Move(args[0].AsString(), args[1].AsString());
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue StrLen(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("strlen expects 1 argument");
+            return MiniCValue.FromInt(args[0].AsString().Length);
+        }
+
+        private static MiniCValue StrChar(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("strchar expects string and index");
+            var text = args[0].AsString();
+            var index = args[1].AsInt();
+            if ((uint)index >= text.Length) return MiniCValue.FromInt(-1);
+            return MiniCValue.FromInt(text[index]);
+        }
+
+        private static MiniCValue SubStr(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 3) throw new MiniCRuntimeException("substr expects string, start, length");
+            var text = args[0].AsString();
+            var start = Math.Max(0, args[1].AsInt());
+            var length = Math.Max(0, args[2].AsInt());
+            if (start >= text.Length || length == 0) return MiniCValue.FromString(string.Empty);
+            var maxLen = Math.Min(length, text.Length - start);
+            return MiniCValue.FromString(text.Substring(start, maxLen));
+        }
+
+        private static MiniCValue StrCat(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count < 2) throw new MiniCRuntimeException("strcat expects at least two arguments");
+            var sb = new StringBuilder();
+            foreach (var arg in args) sb.Append(arg.AsString());
+            return MiniCValue.FromString(sb.ToString());
+        }
+
+        private static MiniCValue StartsWith(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("startswith expects value and prefix");
+            var text = args[0].AsString();
+            var prefix = args[1].AsString();
+            return MiniCValue.FromInt(text.StartsWith(prefix, StringComparison.Ordinal) ? 1 : 0);
+        }
+
+        private static MiniCValue Exists(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("exists expects path");
+            return MiniCValue.FromInt(ctx.Sys.Exists(args[0].AsString()) ? 1 : 0);
         }
     }
 

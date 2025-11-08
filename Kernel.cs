@@ -1,5 +1,6 @@
 
 using System;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace MiniOS
@@ -35,6 +36,15 @@ int main(void) {
     }
     return 0;
 }");
+
+            // Load the vi editor into /bin and the user home if available
+            var viPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Vi.c"));
+            if (File.Exists(viPath))
+            {
+                var viSource = File.ReadAllText(viPath);
+                Vfs.WriteAllText("/bin/vi.c", viSource);
+                Vfs.WriteAllText("/home/user/vi.c", viSource);
+            }
 
             var shell = new Shell(Vfs, Scheduler, Terminal, Loader);
             await shell.RunAsync();

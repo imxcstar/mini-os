@@ -74,7 +74,7 @@ namespace MiniOS
             switch (cmd)
             {
                 case "help":
-                    _term.WriteLine("Builtins: pwd, cd, ls, cat, echo, write, touch, mkdir, rm, ps, kill, sleep, run, compile, exit");
+                    _term.WriteLine("Builtins: pwd, cd, ls, cat, echo, write, touch, mkdir, rm, mv, cp, rename, ps, kill, sleep, run, compile, exit");
                     _term.WriteLine("Run Brainfuck .bf or C .c programs inside the virtual system.");
                     return true;
                 case "pwd":
@@ -112,6 +112,15 @@ namespace MiniOS
                 case "rm":
                     if (args.Length == 0) { _term.WriteLine("rm <path>"); return true; }
                     _vfs.Remove(Resolve(args[0])); return true;
+                case "mv":
+                    if (args.Length < 2) { _term.WriteLine("mv <source> <destination>"); return true; }
+                    _vfs.Move(Resolve(args[0]), Resolve(args[1])); return true;
+                case "cp":
+                    if (args.Length < 2) { _term.WriteLine("cp <source> <destination>"); return true; }
+                    _vfs.Copy(Resolve(args[0]), Resolve(args[1])); return true;
+                case "rename":
+                    if (args.Length < 2) { _term.WriteLine("rename <path> <new-name>"); return true; }
+                    _vfs.Rename(Resolve(args[0]), args[1]); return true;
                 case "ps":
                     foreach (var p in _sched.List()) _term.WriteLine($"{p.Pid}\t{p.State}\t{p.Name}");
                     return true;
