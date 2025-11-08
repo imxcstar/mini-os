@@ -10,7 +10,8 @@ namespace MiniOS
         public static readonly Vfs Vfs = new Vfs();
         public static readonly Terminal Terminal = new Terminal();
         public static readonly Syscalls Sys = new Syscalls(Vfs, Scheduler, Terminal);
-        public static readonly ProgramLoader Loader = new ProgramLoader(Vfs, Scheduler, Terminal);
+        public static readonly SysApi Api = new SysApi(Sys);
+        public static readonly ProgramLoader Loader = new ProgramLoader(Vfs, Scheduler, Terminal, Api);
 
         public static async Task BootAsync()
         {
@@ -20,10 +21,20 @@ namespace MiniOS
             Vfs.Mkdir("/bin");
             Vfs.Mkdir("/home");
             Vfs.Mkdir("/home/user");
-            Vfs.WriteAllText("/home/user/readme.txt", "Welcome to MiniOS with Brainfuck VM and a tiny C->BF compiler!");
+            Vfs.WriteAllText("/home/user/readme.txt", "Welcome to MiniOS with the Brainfuck VM plus a richer MiniC runtime. Try 'run /home/user/hello.c'.");
 
-            // Seed a simple C hello
-            Vfs.WriteAllText("/home/user/hello.c", @"int main(){ puts(""Hello from MiniC!""); return 0; }");
+            // Seed a feature-rich MiniC hello
+            Vfs.WriteAllText("/home/user/hello.c", @"#include <stdio.h>
+
+int main(void) {
+    printf(""MiniC runtime demo\n"");
+    char buffer[32] = ""Hello from MiniC!"";
+    puts(buffer);
+    for (int i = 0; i < 5; ++i) {
+        printf(""i=%d\n"", i);
+    }
+    return 0;
+}");
 
             var shell = new Shell(Vfs, Scheduler, Terminal, Loader);
             await shell.RunAsync();

@@ -52,13 +52,11 @@ namespace MiniOS
                     }
                     if (cmd == "compile")
                     {
-                        if (args.Length < 1) { _term.WriteLine("compile <in.c> [out.bf]"); continue; }
+                        if (args.Length < 1) { _term.WriteLine("compile <in.c>"); continue; }
                         var inPath = Resolve(args[0]);
-                        var outPath = args.Length>1 ? Resolve(args[1]) : inPath[..^2] + ".bf";
                         var csrc = _vfs.ReadAllText(inPath);
-                        var bf = MiniCCompiler.Compile(csrc);
-                        _vfs.WriteAllText(outPath, bf);
-                        _term.WriteLine($"compiled -> {outPath}");
+                        MiniCCompiler.Compile(csrc);
+                        _term.WriteLine("MiniC compilation succeeded");
                         continue;
                     }
 
