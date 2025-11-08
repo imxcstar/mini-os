@@ -24,9 +24,8 @@ namespace MiniOS
         void Remove(string path);
         void Mkdir(string path);
         bool Exists(string path);
-        void Rename(string path, string newName);
-        void Copy(string source, string destination);
-        void Move(string source, string destination);
+        void Rename(string source, string destination);
+        FsNodeInfo Stat(string path);
         IEnumerable<ProcessInfo> ListProcesses();
         bool Kill(int pid);
         int Spawn(string path);
@@ -38,4 +37,5 @@ namespace MiniOS
     }
 
     public readonly record struct ProcessInfo(int Pid, string Name, ProcState State);
+    public readonly record struct FsNodeInfo(bool Exists, bool IsDir, long Size);
 }

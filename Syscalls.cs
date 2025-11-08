@@ -63,9 +63,8 @@ namespace MiniOS
         public void Remove(string path) => _vfs.Remove(path, GetWorkingDirectory());
         public void Mkdir(string path) => _vfs.Mkdir(path, GetWorkingDirectory());
         public bool Exists(string path) => _vfs.Exists(path, GetWorkingDirectory());
-        public void Rename(string path, string newName) => _vfs.Rename(path, newName, GetWorkingDirectory());
-        public void Move(string source, string destination) => _vfs.Move(source, destination, GetWorkingDirectory());
-        public void Copy(string source, string destination) => _vfs.Copy(source, destination, GetWorkingDirectory());
+        public void Rename(string source, string destination) => _vfs.Rename(source, destination, GetWorkingDirectory());
+        public FsNodeInfo Stat(string path) => _vfs.Stat(path, GetWorkingDirectory());
         public IEnumerable<ProcessInfo> ListProcesses()
         {
             foreach (var proc in _sched.List())

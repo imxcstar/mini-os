@@ -73,18 +73,22 @@ namespace MiniOS
             var (dir, leaf) = ResolveParent(path, cwd);
             dir.Remove(leaf);
         }
-        public void Rename(string path, string newName, DirectoryNode? cwd = null)
+        public void Rename(string sourcePath, string destinationPath, DirectoryNode? cwd = null)
         {
-            if (string.IsNullOrWhiteSpace(newName))
-                throw new ArgumentException("newName");
-            var (dir, leaf) = ResolveParent(path, cwd);
-            if (!dir.Children.TryGetValue(leaf, out var node))
-                throw new InvalidOperationException($"No such path: {path}");
-            if (dir.Children.ContainsKey(newName))
-                throw new InvalidOperationException($"Target '{newName}' already exists");
-            dir.Remove(leaf);
-            node.Name = newName;
-            dir.Add(node);
+            if (string.IsNullOrWhiteSpace(destinationPath))
+                throw new ArgumentException("destinationPath");
+            var node = Resolve(sourcePath, cwd);
+            if (node == _root) throw new InvalidOperationException("Cannot rename root");
+            var (destDir, destLeaf) = ResolveParent(destinationPath, cwd);
+            if (node is DirectoryNode dirNode && IsDescendant(dirNode, destDir))
+                throw new InvalidOperationException("Cannot move directory into its subtree");
+            if (destDir.Children.ContainsKey(destLeaf))
+                throw new InvalidOperationException($"Destination '{destLeaf}' already exists");
+            if (node.Parent is not DirectoryNode parent)
+                throw new InvalidOperationException("Node has no parent");
+            parent.Remove(node.Name);
+            node.Name = destLeaf;
+            destDir.Add(node);
         }
         public void Move(string source, string destination, DirectoryNode? cwd = null)
         {
@@ -163,6 +167,26 @@ namespace MiniOS
             catch
             {
                 return false;
+            }
+        }
+        public FsNodeInfo Stat(string path, DirectoryNode? cwd = null)
+        {
+            try
+            {
+                var node = Resolve(path, cwd);
+                if (node is FileNode file)
+                    return new FsNodeInfo(true, false, file.Data.LongLength);
+                if (node is DirectoryNode)
+                    return new FsNodeInfo(true, true, 0);
+                return new FsNodeInfo(false, false, 0);
+            }
+            catch (InvalidOperationException)
+            {
+                return new FsNodeInfo(false, false, 0);
+            }
+            catch (ArgumentException)
+            {
+                return new FsNodeInfo(false, false, 0);
             }
         }
         public DirectoryNode GetCwd(string path, DirectoryNode? cwd = null)

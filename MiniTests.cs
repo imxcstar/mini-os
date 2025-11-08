@@ -45,7 +45,7 @@ public static class MiniTests
         vfs.WriteAllText("/home/user/a.txt", "alpha");
         vfs.Copy("/home/user/a.txt", "/home/user/b.txt");
         AssertEqual("alpha", vfs.ReadAllText("/home/user/b.txt"), "copy should duplicate content");
-        vfs.Rename("/home/user/b.txt", "renamed.txt");
+        vfs.Rename("/home/user/b.txt", "/home/user/renamed.txt");
         AssertEqual("alpha", vfs.ReadAllText("/home/user/renamed.txt"), "rename keeps content");
         vfs.Mkdir("/home/user/docs");
         vfs.Move("/home/user/renamed.txt", "/home/user/docs/final.txt");
@@ -60,6 +60,33 @@ public static class MiniTests
         term.EnqueueInputs("Tester");
         var source = @"#include <stdio.h>
 
+void copy_file(char* src, char* dst)
+{
+    if (!exists(src)) return;
+    char* payload = readall(src);
+    writeall(dst, payload);
+}
+
+void move_file(char* src, char* dst)
+{
+    copy_file(src, dst);
+    remove(src);
+}
+
+void dump_dir(char* path)
+{
+    int count = dir_count(path);
+    int index = 0;
+    while (index < count)
+    {
+        char* name = dir_name(path, index);
+        int kind = dir_is_dir(path, index);
+        int size = dir_size(path, index);
+        printf(""dir:%s:%d:%d\n"", name, kind, size);
+        index = index + 1;
+    }
+}
+
 int main(void) {
     char* lines[3];
     lines[0] = ""alpha"";
@@ -70,8 +97,9 @@ int main(void) {
     chdir(""/home/user"");
     printf(""cwd2=%s\n"", cwd());
     printf(""argc=%d\n"", argc());
-    char* listing = listdir(""."");
-    printf(""list:%s"", listing);
+    dump_dir(""."");
+    printf(""home-isdir=%d\n"", isdir(""/home""));
+    printf(""payload-size=%d\n"", filesize(""/home/user/a.txt""));
     char* slice = substr(""hello"", 1, 3);
     printf(""slice=%s\n"", slice);
     char* who = input(""name?"");
@@ -79,10 +107,11 @@ int main(void) {
     if (startswith(lines[2], ""alph"")) {
         puts(""prefix-ok"");
     }
-    rename(""/home/user/a.txt"", ""b.txt"");
-    copy(""/home/user/b.txt"", ""/home/user/copy.txt"");
-    move(""/home/user/copy.txt"", ""/home/user/moved.txt"");
+    rename(""/home/user/a.txt"", ""/home/user/b.txt"");
+    copy_file(""/home/user/b.txt"", ""/home/user/copy.txt"");
+    move_file(""/home/user/copy.txt"", ""/home/user/moved.txt"");
     if (exists(""/home/user/moved.txt"")) puts(""files-ok"");
+    printf(""moved-size=%d\n"", filesize(""/home/user/moved.txt""));
     return 0;
 }";
         var program = MiniCCompiler.Compile(source);
@@ -94,7 +123,10 @@ int main(void) {
         Assert(term.Output.Contains("files-ok"), "file ops confirmation missing");
         Assert(term.Output.Contains("cwd2=/home/user"), "cwd change missing");
         Assert(term.Output.Contains("argc=0"), "argc default should be zero");
-        Assert(term.Output.Contains("readme.txt"), "listdir result missing");
+        Assert(term.Output.Contains("dir:readme.txt"), "directory listing result missing");
+        Assert(term.Output.Contains("home-isdir=1"), "isdir result missing");
+        Assert(term.Output.Contains("payload-size=7"), "filesize result missing");
+        Assert(term.Output.Contains("moved-size=7"), "moved filesize missing");
         AssertEqual("payload", vfs.ReadAllText("/home/user/moved.txt"), "moved file lost content");
     }
 
