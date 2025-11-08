@@ -1,14 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="rootfs\**\*">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
+    <Compile Remove="MiniOs.ConsoleHost\**\*" />
+    <Compile Remove="MiniOs.BlazorWasm\**\*" />
+    <None Remove="MiniOs.ConsoleHost\**\*" />
+    <None Remove="MiniOs.BlazorWasm\**\*" />
+    <EmbeddedResource Remove="MiniOs.ConsoleHost\**\*" />
+    <EmbeddedResource Remove="MiniOs.BlazorWasm\**\*" />
+    <Content Remove="MiniOs.ConsoleHost\**\*" />
+    <Content Remove="MiniOs.BlazorWasm\**\*" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="rootfs\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>
