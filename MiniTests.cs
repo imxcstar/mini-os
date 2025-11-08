@@ -16,6 +16,7 @@ public static class MiniTests
             ("VfsOperations", () => Task.Run(TestVfsOperations)),
             ("MiniCStringRuntime", () => Task.Run(TestMiniCRuntimeFeatures)),
             ("MiniCIncludeSupport", () => Task.Run(TestMiniCIncludeResolution)),
+            ("MiniCRequiresIncludes", () => Task.Run(TestMissingIncludeRequirement)),
             ("ViWorkflow", () => Task.Run(TestViWorkflow))
         };
 
@@ -158,6 +159,26 @@ int main(void)
         var runtime = new MiniCRuntime(program, api);
         var exit = runtime.Run(CancellationToken.None);
         Assert(exit == 42, "include processing should allow nested headers in the virtual filesystem");
+    }
+
+    private static void TestMissingIncludeRequirement()
+    {
+        const string source = @"
+int main(void)
+{
+    printf(""hello without include\n"");
+    return 0;
+}";
+        bool threw = false;
+        try
+        {
+            MiniCCompiler.Compile(source);
+        }
+        catch (MiniCCompileException)
+        {
+            threw = true;
+        }
+        Assert(threw, "printf should require #include <stdio.h>");
     }
 
     private static (Vfs vfs, ISysApi api, TestTerminal term) CreateSystem()

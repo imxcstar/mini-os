@@ -20,7 +20,9 @@ namespace MiniOS
             var preprocessor = new MiniCPreprocessor(includeResolver);
             var processed = preprocessor.Process(source, sourcePath);
             var parser = new MiniCParser(processed);
-            return parser.ParseProgram();
+            var program = parser.ParseProgram();
+            MiniCSemanticAnalyzer.Validate(program);
+            return program;
         }
     }
 
@@ -988,6 +990,113 @@ namespace MiniOS
     }
 
     #endregion
+
+    internal static class MiniCSemanticAnalyzer
+    {
+        public static void Validate(MiniCProgram program)
+        {
+            var knownFunctions = new HashSet<string>(program.Functions.Keys, StringComparer.Ordinal);
+            foreach (var function in program.Functions.Values)
+            {
+                if (function.HasBody)
+                    ValidateStatement(function.Body, knownFunctions);
+            }
+            foreach (var global in program.Globals)
+            {
+                if (global.Initializer != null)
+                    ValidateExpression(global.Initializer, knownFunctions);
+            }
+        }
+
+        private static void ValidateStatement(MiniCStatement stmt, HashSet<string> known)
+        {
+            switch (stmt)
+            {
+                case BlockStmt block:
+                    foreach (var inner in block.Statements)
+                        ValidateStatement(inner, known);
+                    break;
+                case VarDeclStmt decl:
+                    foreach (var item in decl.Decls)
+                        if (item.Initializer != null)
+                            ValidateExpression(item.Initializer, known);
+                    break;
+                case ExprStmt exprStmt:
+                    ValidateExpression(exprStmt.Expression, known);
+                    break;
+                case IfStmt ifStmt:
+                    ValidateExpression(ifStmt.Condition, known);
+                    ValidateStatement(ifStmt.Then, known);
+                    if (ifStmt.Else != null) ValidateStatement(ifStmt.Else, known);
+                    break;
+                case WhileStmt whileStmt:
+                    ValidateExpression(whileStmt.Condition, known);
+                    ValidateStatement(whileStmt.Body, known);
+                    break;
+                case ForStmt forStmt:
+                    if (forStmt.Init != null) ValidateStatement(forStmt.Init, known);
+                    if (forStmt.Condition != null) ValidateExpression(forStmt.Condition, known);
+                    if (forStmt.Post != null) ValidateExpression(forStmt.Post, known);
+                    ValidateStatement(forStmt.Body, known);
+                    break;
+                case ReturnStmt ret:
+                    if (ret.Expression != null) ValidateExpression(ret.Expression, known);
+                    break;
+                case BreakStmt:
+                case ContinueStmt:
+                    break;
+                default:
+                    throw new MiniCCompileException($"Unsupported statement '{stmt.GetType().Name}'");
+            }
+        }
+
+        private static void ValidateExpression(Expr expr, HashSet<string> known)
+        {
+            switch (expr)
+            {
+                case IntLiteralExpr:
+                case StringLiteralExpr:
+                    return;
+                case VarExpr:
+                    return;
+                case ArrayAccessExpr array:
+                    ValidateExpression(array.Index, known);
+                    return;
+                case PointerIndexExpr ptrIndex:
+                    ValidateExpression(ptrIndex.Pointer, known);
+                    ValidateExpression(ptrIndex.Index, known);
+                    return;
+                case DerefExpr deref:
+                    ValidateExpression(deref.Operand, known);
+                    return;
+                case BinaryExpr bin:
+                    ValidateExpression(bin.Left, known);
+                    ValidateExpression(bin.Right, known);
+                    return;
+                case UnaryExpr unary:
+                    ValidateExpression(unary.Operand, known);
+                    return;
+                case PrefixUpdateExpr prefix:
+                    ValidateExpression(prefix.Operand, known);
+                    return;
+                case PostfixUpdateExpr postfix:
+                    ValidateExpression(postfix.Operand, known);
+                    return;
+                case AssignmentExpr assign:
+                    ValidateExpression(assign.Target, known);
+                    ValidateExpression(assign.Value, known);
+                    return;
+                case CallExpr call:
+                    if (!known.Contains(call.Name))
+                        throw new MiniCCompileException($"Function '{call.Name}' is not declared. Did you forget an #include?");
+                    foreach (var argument in call.Arguments)
+                        ValidateExpression(argument, known);
+                    return;
+                default:
+                    throw new MiniCCompileException($"Unsupported expression '{expr.GetType().Name}'");
+            }
+        }
+    }
 
     public sealed class MiniCCompileException : Exception
     {
