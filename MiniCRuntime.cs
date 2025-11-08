@@ -13,18 +13,20 @@ namespace MiniOS
     {
         private readonly MiniCProgram _program;
         private readonly ISysApi _sys;
+        private readonly MiniCMemory _memory;
 
-        public MiniCRuntime(MiniCProgram program, ISysApi sys)
+        public MiniCRuntime(MiniCProgram program, ISysApi sys, MiniCMemory? memory = null)
         {
             _program = program;
             _sys = sys;
+            _memory = memory ?? new MiniCMemory();
         }
 
         public Task<int> RunAsync(CancellationToken ct) => Task.Run(() => Run(ct), ct);
 
         public int Run(CancellationToken ct)
         {
-            var ctx = new MiniCEvalContext(_program, _sys, ct);
+            var ctx = new MiniCEvalContext(_program, _sys, _memory, ct);
             var result = ctx.CallFunction("main", Array.Empty<MiniCValue>());
             return result.Kind == MiniCValueKind.Int ? result.AsInt() : 0;
         }
@@ -34,19 +36,22 @@ namespace MiniOS
     {
         private readonly MiniCProgram _program;
         private readonly ISysApi _sys;
+        private readonly MiniCMemory _memory;
         private readonly CancellationToken _ct;
         private readonly Stack<MiniCStackFrame> _frames = new();
         private readonly Dictionary<string, MiniCVariable> _globals = new(StringComparer.Ordinal);
 
-        public MiniCEvalContext(MiniCProgram program, ISysApi sys, CancellationToken ct)
+        public MiniCEvalContext(MiniCProgram program, ISysApi sys, MiniCMemory memory, CancellationToken ct)
         {
             _program = program;
             _sys = sys;
+            _memory = memory;
             _ct = ct;
             InitializeGlobals();
         }
 
         public ISysApi Sys => _sys;
+        public MiniCMemory Memory => _memory;
         public CancellationToken CancellationToken => _ct;
 
         public MiniCValue CallFunction(string name, IReadOnlyList<MiniCValue> args)
@@ -91,21 +96,15 @@ namespace MiniOS
 
         private MiniCValue ValidateReturn(MiniCFunction fn, MiniCValue value)
         {
-            if (fn.ReturnType.Kind == MiniCTypeKind.Void)
+            if (fn.ReturnType.Kind == MiniCTypeKind.Void && !fn.ReturnType.IsPointer)
             {
                 if (value.Kind != MiniCValueKind.Void)
                     throw new MiniCRuntimeException($"Function '{fn.Name}' returns void but value provided");
                 return MiniCValue.Void;
             }
-            if (fn.ReturnType.Kind == MiniCTypeKind.String)
-            {
-                if (value.Kind != MiniCValueKind.String)
-                    throw new MiniCRuntimeException($"Function '{fn.Name}' must return string");
-                return value;
-            }
-            if (value.Kind == MiniCValueKind.Void)
+            if (value.Kind == MiniCValueKind.Void && !fn.ReturnType.IsPointer)
                 return MiniCValue.FromInt(0);
-            return MiniCValue.FromInt(value.AsInt());
+            return NormalizeValueForType(fn.ReturnType, value);
         }
 
         public MiniCVariable ResolveVariable(string name)
@@ -298,24 +297,30 @@ namespace MiniOS
             }
             if (decl.Initializer != null)
                 AssignValue(variable, decl.Initializer.Evaluate(this));
-            else if (decl.Type.IsString)
-                variable.SetValue(MiniCValue.FromString(string.Empty));
-            else
-                variable.SetValue(MiniCValue.FromInt(0));
         }
 
-        private static void AssignValue(MiniCVariable variable, MiniCValue value)
+        internal MiniCValue NormalizeValueForType(MiniCVarType type, MiniCValue value)
+        {
+            if (type.IsPointer)
+            {
+                if (value.Kind == MiniCValueKind.Pointer)
+                    return value;
+                if (value.Kind == MiniCValueKind.String)
+                    return MiniCValue.FromPointer(_memory.StoreString(value.AsString()));
+                if (value.Kind == MiniCValueKind.Void || (value.Kind == MiniCValueKind.Int && value.AsInt() == 0))
+                    return MiniCValue.NullPointer;
+                throw new MiniCRuntimeException("Expected pointer value");
+            }
+            var numeric = value.Kind == MiniCValueKind.Void ? 0 : value.AsInt();
+            return MiniCValue.FromInt(numeric);
+        }
+
+        internal void AssignValue(MiniCVariable variable, MiniCValue value)
         {
             if (variable.IsArray)
                 throw new MiniCRuntimeException("Cannot assign entire array");
-            if (variable.Type.Kind == MiniCTypeKind.String)
-            {
-                if (value.Kind != MiniCValueKind.String)
-                    throw new MiniCRuntimeException("Expected string value");
-                variable.SetValue(value);
-                return;
-            }
-            variable.SetValue(value.Kind == MiniCValueKind.Void ? MiniCValue.FromInt(0) : MiniCValue.FromInt(value.AsInt()));
+            var normalized = NormalizeValueForType(variable.Type, value);
+            variable.SetValue(normalized);
         }
     }
 
@@ -370,8 +375,7 @@ namespace MiniOS
 
     public sealed class MiniCVariable
     {
-        private readonly int[]? _numericArray;
-        private readonly string?[]? _stringArray;
+        private readonly MiniCValue[]? _array;
         private MiniCValue _value;
 
         public string Name { get; }
@@ -387,24 +391,25 @@ namespace MiniOS
             if (isArray)
             {
                 if (arrayLength <= 0) throw new MiniCRuntimeException($"Array '{name}' must have positive length");
-                if (!type.IsNumeric && type.Kind != MiniCTypeKind.String)
-                    throw new MiniCRuntimeException("Only numeric, char or string arrays supported");
+                if (!type.IsNumeric && !type.IsPointer)
+                    throw new MiniCRuntimeException("Only numeric or pointer arrays supported");
                 ArrayLength = arrayLength;
-                if (type.Kind == MiniCTypeKind.String)
-                {
-                    _stringArray = new string?[arrayLength];
-                    for (int i = 0; i < arrayLength; i++) _stringArray[i] = string.Empty;
-                }
-                else
-                {
-                    _numericArray = new int[arrayLength];
-                }
+                _array = new MiniCValue[arrayLength];
+                for (int i = 0; i < arrayLength; i++)
+                    _array[i] = DefaultValue();
             }
             else
             {
                 ArrayLength = 0;
-                _value = type.Kind == MiniCTypeKind.String ? MiniCValue.FromString(string.Empty) : MiniCValue.FromInt(0);
+                _value = DefaultValue();
             }
+        }
+
+        private MiniCValue DefaultValue()
+        {
+            if (Type.IsPointer)
+                return MiniCValue.NullPointer;
+            return MiniCValue.FromInt(0);
         }
 
         public MiniCValue GetValue()
@@ -416,66 +421,62 @@ namespace MiniOS
         public void SetValue(MiniCValue value)
         {
             if (IsArray) throw new MiniCRuntimeException("Array cannot be assigned directly");
-            if (Type.Kind == MiniCTypeKind.String)
-            {
-                if (value.Kind != MiniCValueKind.String)
-                    throw new MiniCRuntimeException("Expected string assignment");
-                _value = value;
-            }
-            else
-            {
-                if (value.Kind == MiniCValueKind.String)
-                    throw new MiniCRuntimeException("Cannot assign string to numeric variable");
-                _value = MiniCValue.FromInt(value.AsInt());
-            }
+            _value = value;
         }
 
         public MiniCValue GetArrayElementValue(int index)
         {
             EnsureArrayIndex(index);
-            if (_stringArray is not null)
-                return MiniCValue.FromString(_stringArray[index] ?? string.Empty);
-            return MiniCValue.FromInt(_numericArray![index]);
+            return _array![index];
         }
 
         public void SetArrayElementValue(int index, MiniCValue value)
         {
             EnsureArrayIndex(index);
-            if (_stringArray is not null)
+            if (Type.Kind == MiniCTypeKind.Char)
             {
-                if (value.Kind != MiniCValueKind.String)
-                    throw new MiniCRuntimeException("Expected string assignment");
-                _stringArray[index] = value.AsString();
+                _array![index] = MiniCValue.FromInt(value.AsInt() & 0xFF);
                 return;
             }
-            if (value.Kind == MiniCValueKind.String)
-                throw new MiniCRuntimeException("Cannot assign string to numeric array element");
-            var intValue = value.AsInt();
-            _numericArray![index] = Type.Kind == MiniCTypeKind.Char ? (intValue & 0xFF) : intValue;
+            if (Type.Kind == MiniCTypeKind.Int)
+            {
+                _array![index] = MiniCValue.FromInt(value.AsInt());
+                return;
+            }
+            if (Type.Kind == MiniCTypeKind.Pointer)
+            {
+                if (value.Kind != MiniCValueKind.Pointer)
+                    throw new MiniCRuntimeException("Expected pointer assignment");
+                _array![index] = value;
+                return;
+            }
+            _array![index] = value;
         }
 
         public string ReadArrayAsString()
         {
-            if (_numericArray is null || Type.Kind != MiniCTypeKind.Char)
+            if (_array is null || Type.Kind != MiniCTypeKind.Char)
                 throw new MiniCRuntimeException("Variable is not a char array");
             var sb = new StringBuilder();
-            foreach (var cell in _numericArray)
+            foreach (var cell in _array)
             {
-                if (cell == 0) break;
-                sb.Append((char)cell);
+                var ch = cell.AsInt();
+                if (ch == 0) break;
+                sb.Append((char)(ch & 0xFF));
             }
             return sb.ToString();
         }
 
         public void WriteStringToArray(string value)
         {
-            if (_numericArray is null || Type.Kind != MiniCTypeKind.Char)
+            if (_array is null || Type.Kind != MiniCTypeKind.Char)
                 throw new MiniCRuntimeException("Variable is not a char array");
-            var len = Math.Min(value.Length, _numericArray.Length > 0 ? _numericArray.Length - 1 : 0);
+            if (_array.Length == 0) return;
+            var copyLen = Math.Min(value.Length, _array.Length - 1);
             int i = 0;
-            for (; i < len; i++) _numericArray[i] = value[i];
-            if (_numericArray.Length > 0) _numericArray[len] = 0;
-            for (int j = len + 1; j < _numericArray.Length; j++) _numericArray[j] = 0;
+            for (; i < copyLen; i++) _array[i] = MiniCValue.FromInt(value[i]);
+            _array[i] = MiniCValue.FromInt(0);
+            for (int j = i + 1; j < _array.Length; j++) _array[j] = MiniCValue.FromInt(0);
         }
 
         private void EnsureArrayIndex(int index)
@@ -488,57 +489,92 @@ namespace MiniOS
 
     public readonly struct MiniCLValue
     {
-        private readonly MiniCVariable _variable;
+        private readonly MiniCEvalContext _ctx;
+        private readonly MiniCVariable? _variable;
         private readonly int? _index;
+        private readonly MiniCPointer _pointer;
+        private readonly MiniCLocationKind _kind;
 
-        public MiniCLValue(MiniCVariable variable, int? index)
+        public MiniCLValue(MiniCEvalContext ctx, MiniCVariable variable, int? index)
         {
+            _ctx = ctx;
             _variable = variable;
             _index = index;
+            _pointer = MiniCPointer.Null;
+            _kind = index.HasValue ? MiniCLocationKind.ArrayElement : MiniCLocationKind.Scalar;
+        }
+
+        public MiniCLValue(MiniCEvalContext ctx, MiniCPointer pointer)
+        {
+            _ctx = ctx;
+            _variable = null;
+            _index = null;
+            _pointer = pointer;
+            _kind = MiniCLocationKind.Memory;
         }
 
         public MiniCValue Get()
         {
-            if (_index.HasValue)
-                return _variable.GetArrayElementValue(_index.Value);
-            return _variable.GetValue();
+            return _kind switch
+            {
+                MiniCLocationKind.Scalar => _variable!.GetValue(),
+                MiniCLocationKind.ArrayElement => _variable!.GetArrayElementValue(_index!.Value),
+                MiniCLocationKind.Memory => MiniCValue.FromInt(_pointer.Memory?.ReadByte(_pointer.Address) ?? 0),
+                _ => MiniCValue.Void
+            };
         }
 
         public void Set(MiniCValue value)
         {
-            if (_index.HasValue)
+            switch (_kind)
             {
-                _variable.SetArrayElementValue(_index.Value, value);
-            }
-            else
-            {
-                _variable.SetValue(value);
+                case MiniCLocationKind.Scalar:
+                    _ctx.AssignValue(_variable!, value);
+                    break;
+                case MiniCLocationKind.ArrayElement:
+                    var normalized = _ctx.NormalizeValueForType(_variable!.Type, value);
+                    _variable.SetArrayElementValue(_index!.Value, normalized);
+                    break;
+                case MiniCLocationKind.Memory:
+                    var b = (byte)(value.Kind == MiniCValueKind.Void ? 0 : value.AsInt() & 0xFF);
+                    _pointer.Memory?.WriteByte(_pointer.Address, b);
+                    break;
             }
         }
     }
+
+    internal enum MiniCLocationKind { Scalar, ArrayElement, Memory }
 
     public readonly struct MiniCValue
     {
         public MiniCValueKind Kind { get; }
         private readonly int _intValue;
         private readonly string? _stringValue;
+        private readonly MiniCPointer _pointerValue;
 
-        private MiniCValue(MiniCValueKind kind, int intValue, string? stringValue)
+        private MiniCValue(MiniCValueKind kind, int intValue, string? stringValue, MiniCPointer pointerValue)
         {
             Kind = kind;
             _intValue = intValue;
             _stringValue = stringValue;
+            _pointerValue = pointerValue;
         }
 
-        public static MiniCValue FromInt(int value) => new(MiniCValueKind.Int, value, null);
-        public static MiniCValue FromString(string value) => new(MiniCValueKind.String, 0, value);
-        public static MiniCValue Void => new(MiniCValueKind.Void, 0, null);
+        public static MiniCValue FromInt(int value) => new(MiniCValueKind.Int, value, null, MiniCPointer.Null);
+        public static MiniCValue FromString(string value) => new(MiniCValueKind.String, 0, value, MiniCPointer.Null);
+        public static MiniCValue FromPointer(MiniCPointer pointer) => new(MiniCValueKind.Pointer, 0, null, pointer);
+        public static MiniCValue NullPointer => FromPointer(MiniCPointer.Null);
+        public static MiniCValue Void => new(MiniCValueKind.Void, 0, null, MiniCPointer.Null);
 
         public int AsInt()
         {
-            if (Kind == MiniCValueKind.Int) return _intValue;
-            if (Kind == MiniCValueKind.Void) return 0;
-            throw new MiniCRuntimeException("Expected integer value");
+            return Kind switch
+            {
+                MiniCValueKind.Int => _intValue,
+                MiniCValueKind.Void => 0,
+                MiniCValueKind.Pointer => _pointerValue.IsNull ? 0 : _pointerValue.Address,
+                _ => throw new MiniCRuntimeException("Expected integer value")
+            };
         }
 
         public string AsString()
@@ -547,12 +583,32 @@ namespace MiniOS
             {
                 MiniCValueKind.String => _stringValue ?? string.Empty,
                 MiniCValueKind.Int => _intValue.ToString(CultureInfo.InvariantCulture),
+                MiniCValueKind.Pointer => _pointerValue.Memory?.ReadString(_pointerValue) ?? string.Empty,
+                MiniCValueKind.Void => string.Empty,
                 _ => string.Empty
+            };
+        }
+
+        public MiniCPointer AsPointer()
+        {
+            if (Kind == MiniCValueKind.Pointer) return _pointerValue;
+            if (Kind == MiniCValueKind.Void) return MiniCPointer.Null;
+            throw new MiniCRuntimeException("Expected pointer value");
+        }
+
+        public MiniCPointer AsPointer(MiniCMemory memory)
+        {
+            return Kind switch
+            {
+                MiniCValueKind.Pointer => _pointerValue,
+                MiniCValueKind.String => memory.StoreString(_stringValue ?? string.Empty),
+                MiniCValueKind.Void => MiniCPointer.Null,
+                _ => throw new MiniCRuntimeException("Expected pointer value")
             };
         }
     }
 
-    public enum MiniCValueKind { Void, Int, String }
+    public enum MiniCValueKind { Void, Int, String, Pointer }
 
     public sealed class MiniCRuntimeException : Exception
     {
@@ -587,12 +643,28 @@ namespace MiniOS
             ["printf"] = Printf,
             ["cwd"] = Cwd,
             ["chdir"] = Chdir,
+            ["malloc"] = Malloc,
+            ["free"] = Free,
+            ["memset"] = MemSet,
+            ["memcpy"] = MemCopy,
+            ["load32"] = Load32,
+            ["store32"] = Store32,
+            ["open"] = OpenFile,
+            ["close"] = CloseFile,
+            ["read"] = ReadFile,
+            ["write"] = WriteFile,
+            ["seek"] = SeekFile,
+            ["stat"] = StatPath,
+            ["opendir"] = OpenDir,
+            ["readdir"] = ReadDir,
+            ["rewinddir"] = RewindDir,
             ["dir_count"] = DirCount,
             ["dir_name"] = DirName,
             ["dir_is_dir"] = DirIsDir,
             ["dir_size"] = DirSize,
             ["mkdir"] = Mkdir,
             ["remove"] = Remove,
+            ["unlink"] = Remove,
             ["isdir"] = IsDir,
             ["filesize"] = FileSize,
             ["sleep_ms"] = Sleep,
@@ -694,6 +766,172 @@ namespace MiniOS
         {
             if (args.Count != 1) throw new MiniCRuntimeException("chdir expects path");
             ctx.Sys.SetCwd(args[0].AsString());
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue Malloc(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("malloc expects size");
+            var size = Math.Max(0, args[0].AsInt());
+            var ptr = ctx.Memory.Allocate(size);
+            ctx.Memory.SetBytes(ptr.Address, 0, size);
+            return MiniCValue.FromPointer(ptr);
+        }
+
+        private static MiniCValue Free(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("free expects pointer");
+            var pointer = args[0].Kind == MiniCValueKind.Void ? MiniCPointer.Null : args[0].AsPointer();
+            ctx.Memory.Free(pointer);
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue MemSet(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 3) throw new MiniCRuntimeException("memset expects pointer, value, count");
+            var ptr = args[0].AsPointer();
+            var value = (byte)(args[1].AsInt() & 0xFF);
+            var count = Math.Max(0, args[2].AsInt());
+            ctx.Memory.SetBytes(ptr.Address, value, count);
+            return args[0];
+        }
+
+        private static MiniCValue MemCopy(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 3) throw new MiniCRuntimeException("memcpy expects dst, src, count");
+            var dst = args[0].AsPointer();
+            var src = args[1].AsPointer(ctx.Memory);
+            var count = Math.Max(0, args[2].AsInt());
+            ctx.Memory.Copy(dst, src, count);
+            return args[0];
+        }
+
+        private static MiniCValue Load32(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("load32 expects pointer and offset");
+            var ptr = args[0].AsPointer();
+            var offset = args[1].AsInt();
+            return MiniCValue.FromInt(ptr.Memory?.ReadInt32(ptr.Address + offset) ?? 0);
+        }
+
+        private static MiniCValue Store32(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 3) throw new MiniCRuntimeException("store32 expects pointer, offset, value");
+            var ptr = args[0].AsPointer();
+            var offset = args[1].AsInt();
+            ptr.Memory?.WriteInt32(ptr.Address + offset, args[2].AsInt());
+            return args[0];
+        }
+
+        private static FileOpenFlags DecodeFileFlags(int flags)
+        {
+            FileOpenFlags result = 0;
+            if ((flags & 1) != 0) result |= FileOpenFlags.Read;
+            if ((flags & 2) != 0) result |= FileOpenFlags.Write;
+            if ((flags & 4) != 0) result |= FileOpenFlags.Create;
+            if ((flags & 8) != 0) result |= FileOpenFlags.Truncate;
+            if ((flags & 16) != 0) result |= FileOpenFlags.Append;
+            if ((result & (FileOpenFlags.Read | FileOpenFlags.Write)) == 0)
+                result |= FileOpenFlags.Read;
+            return result;
+        }
+
+        private static SeekOrigin DecodeSeekOrigin(int value) => value switch
+        {
+            0 => SeekOrigin.Begin,
+            2 => SeekOrigin.End,
+            _ => SeekOrigin.Current
+        };
+
+        private static MiniCValue OpenFile(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count is < 1 or > 2) throw new MiniCRuntimeException("open expects path and optional flags");
+            var path = args[0].AsString();
+            var flags = args.Count == 2 ? args[1].AsInt() : 1;
+            var fd = ctx.Sys.Open(path, DecodeFileFlags(flags));
+            return MiniCValue.FromInt(fd);
+        }
+
+        private static MiniCValue CloseFile(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("close expects fd");
+            return MiniCValue.FromInt(ctx.Sys.Close(args[0].AsInt()));
+        }
+
+        private static MiniCValue ReadFile(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 3) throw new MiniCRuntimeException("read expects fd, buffer, count");
+            var fd = args[0].AsInt();
+            var ptr = args[1].AsPointer();
+            var count = Math.Max(0, args[2].AsInt());
+            var buffer = new byte[count];
+            var read = ctx.Sys.Read(fd, buffer);
+            if (read > 0)
+                ctx.Memory.WriteBytes(ptr.Address, buffer.AsSpan(0, read));
+            return MiniCValue.FromInt(read);
+        }
+
+        private static MiniCValue WriteFile(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 3) throw new MiniCRuntimeException("write expects fd, buffer, count");
+            var fd = args[0].AsInt();
+            var ptr = args[1].AsPointer(ctx.Memory);
+            var count = Math.Max(0, args[2].AsInt());
+            var buffer = new byte[count];
+            ctx.Memory.ReadBytes(ptr.Address, buffer.AsSpan());
+            var written = ctx.Sys.Write(fd, buffer);
+            return MiniCValue.FromInt(written);
+        }
+
+        private static MiniCValue SeekFile(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 3) throw new MiniCRuntimeException("seek expects fd, offset, origin");
+            var fd = args[0].AsInt();
+            var offset = args[1].AsInt();
+            var origin = DecodeSeekOrigin(args[2].AsInt());
+            return MiniCValue.FromInt(ctx.Sys.Seek(fd, offset, origin));
+        }
+
+        private static MiniCValue StatPath(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("stat expects path and buffer");
+            var info = ctx.Sys.Stat(args[0].AsString());
+            var ptr = args[1].AsPointer();
+            var mem = ptr.Memory;
+            if (mem is null) return MiniCValue.FromInt(-1);
+            mem.WriteInt32(ptr.Address + 0, info.Exists ? 1 : 0);
+            mem.WriteInt32(ptr.Address + 4, info.IsDir ? 1 : 0);
+            mem.WriteInt32(ptr.Address + 8, (int)Math.Min(int.MaxValue, info.Size));
+            return MiniCValue.FromInt(info.Exists ? 0 : -1);
+        }
+
+        private static MiniCValue OpenDir(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("opendir expects path");
+            return MiniCValue.FromInt(ctx.Sys.OpenDirectory(args[0].AsString()));
+        }
+
+        private static MiniCValue ReadDir(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 2) throw new MiniCRuntimeException("readdir expects fd and buffer");
+            var fd = args[0].AsInt();
+            var ptr = args[1].AsPointer();
+            if (!ctx.Sys.ReadDirectoryEntry(fd, out var entry))
+                return MiniCValue.FromInt(0);
+            var mem = ptr.Memory;
+            if (mem is null) return MiniCValue.FromInt(-1);
+            mem.WriteInt32(ptr.Address + 0, entry.IsDirectory ? 1 : 0);
+            mem.WriteInt32(ptr.Address + 4, (int)Math.Min(int.MaxValue, entry.Size));
+            var nameBytes = Encoding.UTF8.GetBytes(entry.Name);
+            mem.WriteBytes(ptr.Address + 8, nameBytes);
+            mem.WriteByte(ptr.Address + 8 + nameBytes.Length, 0);
+            return MiniCValue.FromInt(1);
+        }
+
+        private static MiniCValue RewindDir(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("rewinddir expects fd");
+            ctx.Sys.RewindDirectory(args[0].AsInt());
             return MiniCValue.FromInt(0);
         }
 

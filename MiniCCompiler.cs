@@ -324,6 +324,7 @@ namespace MiniOS
             if (Match(TokenKind.Symbol, "-")) return new UnaryExpr("-", ParseUnary());
             if (Match(TokenKind.Symbol, "++")) return new PrefixUpdateExpr("++", ParseUnary());
             if (Match(TokenKind.Symbol, "--")) return new PrefixUpdateExpr("--", ParseUnary());
+            if (Match(TokenKind.Symbol, "*")) return new DerefExpr(ParseUnary());
             return ParsePostfix();
         }
 
@@ -351,9 +352,10 @@ namespace MiniOS
                 {
                     var index = ParseExpression();
                     Expect(TokenKind.Symbol, "]");
-                    if (expr is not VarExpr ve)
-                        throw Error("Array indexing requires a named array");
-                    expr = new ArrayAccessExpr(ve.Name, index);
+                    if (expr is VarExpr ve)
+                        expr = new ArrayAccessExpr(ve.Name, index);
+                    else
+                        expr = new PointerIndexExpr(expr, index);
                 }
                 else break;
             }
@@ -652,15 +654,20 @@ namespace MiniOS
     {
         public MiniCVarType ResolveType()
         {
-            var kind = BaseType.Kind;
-            if (PointerDepth > 0)
+            MiniCVarType resolved = BaseType.Kind switch
             {
-                if (kind == MiniCTypeKind.Char) return new MiniCVarType(MiniCTypeKind.String);
-                throw new MiniCCompileException("Only char* pointers are supported");
+                MiniCTypeKind.Int => MiniCVarType.Int,
+                MiniCTypeKind.Char => MiniCVarType.Char,
+                MiniCTypeKind.Void => MiniCVarType.Void,
+                _ => throw new MiniCCompileException("unsupported base type")
+            };
+            for (int i = 0; i < PointerDepth; i++)
+            {
+                resolved = MiniCVarType.PointerTo(resolved);
             }
-            if (IsArray && kind == MiniCTypeKind.Void)
+            if (IsArray && resolved.Kind == MiniCTypeKind.Void && !resolved.IsPointer)
                 throw new MiniCCompileException("void arrays are not allowed");
-            return new MiniCVarType(kind);
+            return resolved;
         }
     }
 
@@ -688,21 +695,28 @@ namespace MiniOS
 
     public sealed record MiniCFunction(string Name, MiniCVarType ReturnType, IReadOnlyList<MiniCParameter> Parameters, BlockStmt Body, bool HasBody)
     {
-        public bool IsVoid => ReturnType.Kind == MiniCTypeKind.Void;
+        public bool IsVoid => ReturnType.Kind == MiniCTypeKind.Void && !ReturnType.IsPointer;
     }
 
     public sealed record MiniCParameter(string Name, MiniCVarType Type);
 
-    public enum MiniCTypeKind { Void, Int, Char, String }
+    public enum MiniCTypeKind { Void, Int, Char, Pointer }
 
-    public sealed record MiniCVarType(MiniCTypeKind Kind)
+    public sealed record MiniCVarType(MiniCTypeKind Kind, MiniCVarType? ElementType = null)
     {
         public static MiniCVarType Void { get; } = new(MiniCTypeKind.Void);
         public static MiniCVarType Int { get; } = new(MiniCTypeKind.Int);
         public static MiniCVarType Char { get; } = new(MiniCTypeKind.Char);
-        public static MiniCVarType String { get; } = new(MiniCTypeKind.String);
+        public static MiniCVarType PointerTo(MiniCVarType element) => new(MiniCTypeKind.Pointer, element);
         public bool IsNumeric => Kind is MiniCTypeKind.Int or MiniCTypeKind.Char;
-        public bool IsString => Kind == MiniCTypeKind.String;
+        public bool IsPointer => Kind == MiniCTypeKind.Pointer;
+        public int SizeInBytes => Kind switch
+        {
+            MiniCTypeKind.Char => 1,
+            MiniCTypeKind.Int => 4,
+            MiniCTypeKind.Pointer => 4,
+            _ => 0
+        };
     }
 
     public sealed record MiniCVarDecl(MiniCVarType Type, string Name, bool IsArray, int ArrayLength, Expr? Initializer);
@@ -743,7 +757,7 @@ namespace MiniOS
             var variable = ctx.ResolveVariable(Name);
             if (variable.IsArray)
                 throw new MiniCRuntimeException("Cannot assign entire array");
-            return new MiniCLValue(variable, null);
+            return new MiniCLValue(ctx, variable, null);
         }
         public override MiniCValue Evaluate(MiniCEvalContext ctx)
         {
@@ -766,7 +780,7 @@ namespace MiniOS
             var variable = ctx.ResolveVariable(Name);
             if (!variable.IsArray) throw new MiniCRuntimeException($"Variable '{Name}' is not an array");
             var idx = Index.Evaluate(ctx).AsInt();
-            return new MiniCLValue(variable, idx);
+            return new MiniCLValue(ctx, variable, idx);
         }
         public override MiniCValue Evaluate(MiniCEvalContext ctx)
         {
@@ -775,6 +789,29 @@ namespace MiniOS
             var idx = Index.Evaluate(ctx).AsInt();
             return variable.GetArrayElementValue(idx);
         }
+    }
+
+    public sealed record PointerIndexExpr(Expr Pointer, Expr Index) : Expr
+    {
+        public override bool CanAssign => true;
+        public override MiniCLValue GetReference(MiniCEvalContext ctx)
+        {
+            var basePtr = Pointer.Evaluate(ctx).AsPointer();
+            var offset = Index.Evaluate(ctx).AsInt();
+            return new MiniCLValue(ctx, basePtr.Offset(offset));
+        }
+        public override MiniCValue Evaluate(MiniCEvalContext ctx) => GetReference(ctx).Get();
+    }
+
+    public sealed record DerefExpr(Expr Operand) : Expr
+    {
+        public override bool CanAssign => true;
+        public override MiniCLValue GetReference(MiniCEvalContext ctx)
+        {
+            var pointer = Operand.Evaluate(ctx).AsPointer();
+            return new MiniCLValue(ctx, pointer);
+        }
+        public override MiniCValue Evaluate(MiniCEvalContext ctx) => GetReference(ctx).Get();
     }
 
     public sealed record BinaryExpr(string Op, Expr Left, Expr Right) : Expr
@@ -795,6 +832,14 @@ namespace MiniOS
             }
             var l = Left.Evaluate(ctx);
             var r = Right.Evaluate(ctx);
+            if (Op == "+" && l.Kind == MiniCValueKind.Pointer && r.Kind == MiniCValueKind.Int)
+                return MiniCValue.FromPointer(l.AsPointer().Offset(r.AsInt()));
+            if (Op == "+" && l.Kind == MiniCValueKind.Int && r.Kind == MiniCValueKind.Pointer)
+                return MiniCValue.FromPointer(r.AsPointer().Offset(l.AsInt()));
+            if (Op == "-" && l.Kind == MiniCValueKind.Pointer && r.Kind == MiniCValueKind.Int)
+                return MiniCValue.FromPointer(l.AsPointer().Offset(-r.AsInt()));
+            if (Op == "-" && l.Kind == MiniCValueKind.Pointer && r.Kind == MiniCValueKind.Pointer)
+                return MiniCValue.FromInt(l.AsInt() - r.AsInt());
             return Op switch
             {
                 "+" => MiniCValue.FromInt(l.AsInt() + r.AsInt()),
@@ -814,6 +859,20 @@ namespace MiniOS
 
         private static MiniCValue CompareEq(MiniCValue left, MiniCValue right)
         {
+            if (left.Kind == MiniCValueKind.Pointer || right.Kind == MiniCValueKind.Pointer)
+            {
+                if (left.Kind == MiniCValueKind.Pointer && right.Kind == MiniCValueKind.Pointer)
+                {
+                    var equals = PointersEqual(left.AsPointer(), right.AsPointer());
+                    return MiniCValue.FromInt(equals ? 1 : 0);
+                }
+                if ((left.Kind == MiniCValueKind.Pointer && right.Kind == MiniCValueKind.String) ||
+                    (left.Kind == MiniCValueKind.String && right.Kind == MiniCValueKind.Pointer))
+                {
+                    return MiniCValue.FromInt(string.Equals(left.AsString(), right.AsString(), StringComparison.Ordinal) ? 1 : 0);
+                }
+                return MiniCValue.FromInt(left.AsInt() == right.AsInt() ? 1 : 0);
+            }
             if (left.Kind == MiniCValueKind.String || right.Kind == MiniCValueKind.String)
             {
                 var l = left.Kind == MiniCValueKind.String ? left.AsString() : left.AsInt().ToString(CultureInfo.InvariantCulture);
@@ -821,6 +880,13 @@ namespace MiniOS
                 return MiniCValue.FromInt(string.Equals(l, r, StringComparison.Ordinal) ? 1 : 0);
             }
             return MiniCValue.FromInt(left.AsInt() == right.AsInt() ? 1 : 0);
+        }
+
+        private static bool PointersEqual(MiniCPointer a, MiniCPointer b)
+        {
+            if (a.IsNull && b.IsNull) return true;
+            if (a.IsNull || b.IsNull) return false;
+            return ReferenceEquals(a.Memory, b.Memory) && a.Address == b.Address;
         }
     }
 

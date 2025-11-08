@@ -22,6 +22,7 @@ namespace MiniOS
         public ProcessIoPipes Io { get; set; } = ProcessIoPipes.CreateNull();
         public DirectoryNode WorkingDirectory { get; set; } = null!;
         public IReadOnlyList<string> Arguments { get; init; } = Array.Empty<string>();
+        public FileDescriptorTable FileTable { get; set; } = null!;
     }
 
     public class Scheduler
@@ -57,6 +58,7 @@ namespace MiniOS
                 Arguments = args
             };
             pcb.Io = options.IoPipes ?? ProcessIoPipes.CreateTerminalPipes(pcb, _terminal, _inputRouter, inputMode);
+            pcb.FileTable = FileDescriptorTable.Create(pcb.Io);
             _procs[pid] = pcb;
             _inputRouter.Register(pid, inputMode);
             pcb.Task = Task.Run(async () =>
@@ -87,6 +89,7 @@ namespace MiniOS
                 {
                     _procs.TryRemove(pid, out _);
                     _inputRouter.Unregister(pid);
+                    pcb.FileTable.Dispose();
                     ProcessContext.Current = previous;
                 }
             });

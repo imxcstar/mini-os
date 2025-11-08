@@ -1,19 +1,23 @@
 #include <stdio.h>
 
+int FLAG_WRITE = 2;
+int FLAG_CREATE = 4;
+int FLAG_TRUNC = 8;
+
 char* join_text()
 {
-    char* result = "";
+    char* text = "";
     int index = 2;
     while (index < argc())
     {
-        result = strcat(result, argv(index));
+        text = strcat(text, argv(index));
         if (index < argc() - 1)
         {
-            result = strcat(result, " ");
+            text = strcat(text, " ");
         }
         index = index + 1;
     }
-    return result;
+    return text;
 }
 
 int main(void)
@@ -23,9 +27,15 @@ int main(void)
         printf("write <path> <text>\n");
         return 1;
     }
-
     char* path = argv(1);
     char* payload = join_text();
-    writeall(path, payload);
+    int fd = open(path, FLAG_WRITE + FLAG_CREATE + FLAG_TRUNC);
+    if (fd < 0)
+    {
+        printf("write: cannot open %s\n", path);
+        return 1;
+    }
+    write(fd, payload, strlen(payload));
+    close(fd);
     return 0;
 }

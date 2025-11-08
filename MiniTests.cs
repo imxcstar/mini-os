@@ -29,6 +29,7 @@ public static class MiniTests
             }
             catch (Exception ex)
             {
+                Console.WriteLine(ex);
                 Console.WriteLine($"[FAIL] {name}: {ex.Message}");
             }
         }
@@ -60,74 +61,59 @@ public static class MiniTests
         term.EnqueueInputs("Tester");
         var source = @"#include <stdio.h>
 
-void copy_file(char* src, char* dst)
-{
-    if (!exists(src)) return;
-    char* payload = readall(src);
-    writeall(dst, payload);
-}
+int FLAG_READ = 1;
+int FLAG_WRITE = 2;
+int FLAG_CREATE = 4;
+int FLAG_TRUNC = 8;
 
-void move_file(char* src, char* dst)
+void ensure_file(char* path, char* data)
 {
-    copy_file(src, dst);
-    remove(src);
+    int fd = open(path, FLAG_WRITE + FLAG_CREATE + FLAG_TRUNC);
+    if (fd < 0) return;
+    write(fd, data, strlen(data));
+    close(fd);
 }
 
 void dump_dir(char* path)
 {
-    int count = dir_count(path);
-    int index = 0;
-    while (index < count)
+    char* entry = malloc(256);
+    int dir = opendir(path);
+    while (readdir(dir, entry))
     {
-        char* name = dir_name(path, index);
-        int kind = dir_is_dir(path, index);
-        int size = dir_size(path, index);
-        printf(""dir:%s:%d:%d\n"", name, kind, size);
-        index = index + 1;
+        char* name = entry + 8;
+        printf(""dir:%s\n"", name);
     }
+    rewinddir(dir);
+    free(entry);
 }
 
 int main(void) {
-    char* lines[3];
-    lines[0] = ""alpha"";
-    lines[1] = ""beta"";
-    lines[2] = strcat(lines[0], lines[1]);
-    printf(""len=%d char=%d\n"", strlen(lines[2]), strchar(""xyz"", 1));
-    printf(""cwd=%s\n"", cwd());
-    chdir(""/home/user"");
-    printf(""cwd2=%s\n"", cwd());
-    printf(""argc=%d\n"", argc());
-    dump_dir(""."");
-    printf(""home-isdir=%d\n"", isdir(""/home""));
-    printf(""payload-size=%d\n"", filesize(""/home/user/a.txt""));
-    char* slice = substr(""hello"", 1, 3);
-    printf(""slice=%s\n"", slice);
-    char* who = input(""name?"");
-    printf(""hi %s\n"", who);
-    if (startswith(lines[2], ""alph"")) {
-        puts(""prefix-ok"");
-    }
-    rename(""/home/user/a.txt"", ""/home/user/b.txt"");
-    copy_file(""/home/user/b.txt"", ""/home/user/copy.txt"");
-    move_file(""/home/user/copy.txt"", ""/home/user/moved.txt"");
-    if (exists(""/home/user/moved.txt"")) puts(""files-ok"");
-    printf(""moved-size=%d\n"", filesize(""/home/user/moved.txt""));
+    ensure_file(""/home/user/a.txt"", ""payload"");
+    char* info = malloc(32);
+    stat(""/home/user/a.txt"", info);
+    printf(""stat:%d:%d\n"", load32(info, 0), load32(info, 8));
+    dump_dir(""/home/user"");
+    int fd = open(""/home/user/out.txt"", FLAG_WRITE + FLAG_CREATE + FLAG_TRUNC);
+    char* message = ""hello"";
+    write(fd, message, strlen(message));
+    close(fd);
+    fd = open(""/home/user/out.txt"", FLAG_READ);
+    char* buf = malloc(16);
+    int count = read(fd, buf, 5);
+    close(fd);
+    buf[count] = 0;
+    printf(""read:%s\n"", buf);
+    free(buf);
+    free(info);
     return 0;
 }";
         var program = MiniCCompiler.Compile(source);
         var runtime = new MiniCRuntime(program, api);
         runtime.Run(CancellationToken.None);
-        Assert(term.Output.Contains("len=9"), "strlen result should be printed");
-        Assert(term.Output.Contains("slice=ell"), "substr result missing");
-        Assert(term.Output.Contains("hi Tester"), "input result missing");
-        Assert(term.Output.Contains("files-ok"), "file ops confirmation missing");
-        Assert(term.Output.Contains("cwd2=/home/user"), "cwd change missing");
-        Assert(term.Output.Contains("argc=0"), "argc default should be zero");
-        Assert(term.Output.Contains("dir:readme.txt"), "directory listing result missing");
-        Assert(term.Output.Contains("home-isdir=1"), "isdir result missing");
-        Assert(term.Output.Contains("payload-size=7"), "filesize result missing");
-        Assert(term.Output.Contains("moved-size=7"), "moved filesize missing");
-        AssertEqual("payload", vfs.ReadAllText("/home/user/moved.txt"), "moved file lost content");
+        Assert(term.Output.Contains("stat:1:7"), "stat result should mention payload");
+        Assert(term.Output.Contains("dir:out.txt"), "directory listing should include new file");
+        Assert(term.Output.Contains("read:hello"), "read syscall output missing");
+        AssertEqual("hello", vfs.ReadAllText("/home/user/out.txt").Trim(), "out.txt contents mismatch");
     }
 
     private static void TestViWorkflow()

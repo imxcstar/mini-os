@@ -1,18 +1,30 @@
 #include <stdio.h>
 
-void print_entry(char* path, int index)
+int list_dir(char* path)
 {
-    char* name = dir_name(path, index);
-    int kind = dir_is_dir(path, index);
-    int size = dir_size(path, index);
-    if (kind == 1)
+    char* entry = malloc(256);
+    int dir = opendir(path);
+    if (dir < 0)
     {
-        printf("%s/\n", name);
+        printf("ls: cannot open %s\n", path);
+        return 1;
     }
-    else
+    while (readdir(dir, entry))
     {
-        printf("%s\t%d\n", name, size);
+        int is_dir = load32(entry, 0);
+        int size = load32(entry, 4);
+        char* name = entry + 8;
+        if (is_dir)
+        {
+            printf("%s/\n", name);
+        }
+        else
+        {
+            printf("%s\t%d\n", name, size);
+        }
     }
+    free(entry);
+    return 0;
 }
 
 int main(void)
@@ -22,13 +34,5 @@ int main(void)
     {
         target = argv(1);
     }
-
-    int count = dir_count(target);
-    int index = 0;
-    while (index < count)
-    {
-        print_entry(target, index);
-        index = index + 1;
-    }
-    return 0;
+    return list_dir(target);
 }

@@ -3,15 +3,16 @@
 char* join_path(char* base, char* leaf)
 {
     if (startswith(leaf, "/")) return leaf;
-    if (strlen(base) == 0) return leaf;
-    if (strchar(base, strlen(base) - 1) == '/')
+    int len = strlen(base);
+    if (len == 0) return leaf;
+    if (strchar(base, len - 1) == '/')
     {
         return strcat(base, leaf);
     }
     return strcat(strcat(base, "/"), leaf);
 }
 
-char* basename(char* path)
+char* get_basename(char* path)
 {
     int len = strlen(path);
     if (len == 0) return path;
@@ -25,6 +26,16 @@ char* basename(char* path)
         index = index - 1;
     }
     return path;
+}
+
+int is_directory(char* path)
+{
+char* info = malloc(32);
+    stat(path, info);
+    int exists = load32(info, 0);
+    int dir = load32(info, 4);
+    free(info);
+    return exists && dir;
 }
 
 int main(void)
@@ -43,9 +54,9 @@ int main(void)
         return 1;
     }
 
-    if (isdir(destination))
+    if (is_directory(destination))
     {
-        destination = join_path(destination, basename(source));
+        destination = join_path(destination, get_basename(source));
     }
 
     rename(source, destination);

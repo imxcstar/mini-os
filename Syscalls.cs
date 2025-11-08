@@ -1,6 +1,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,6 +22,7 @@ namespace MiniOS
         private DirectoryNode _hostWorkingDirectory;
         private readonly IOutputPipe _terminalOutput;
         private readonly IInputPipe _terminalInput;
+        private readonly FileDescriptorTable _hostFileTable;
         private IProgramRunner? _runner;
 
         public Syscalls(Vfs vfs, Scheduler sched, Terminal term)
@@ -31,10 +33,82 @@ namespace MiniOS
             _rootDir = vfs.GetCwd("/");
             _terminalOutput = new TerminalOutputPipe(term);
             _terminalInput = new TerminalPassthroughInput(term);
+            _hostFileTable = FileDescriptorTable.Create(new ProcessIoPipes(_terminalInput, _terminalOutput, _terminalOutput));
             _hostWorkingDirectory = _rootDir;
         }
 
         public void AttachRunner(IProgramRunner runner) => _runner = runner;
+
+        private FileDescriptorTable CurrentFileTable => ProcessContext.Current?.FileTable ?? _hostFileTable;
+
+        private bool TryGetHandle(int fd, out IFileHandle handle) => CurrentFileTable.TryGet(fd, out handle!);
+
+        public int Open(string path, FileOpenFlags flags)
+        {
+            try
+            {
+                var cwd = GetWorkingDirectory();
+                var node = _vfs.OpenFile(path, cwd, flags.HasFlag(FileOpenFlags.Create), flags.HasFlag(FileOpenFlags.Truncate));
+                var canRead = flags.HasFlag(FileOpenFlags.Read) || !flags.HasFlag(FileOpenFlags.Write);
+                var canWrite = flags.HasFlag(FileOpenFlags.Write) || flags.HasFlag(FileOpenFlags.Append);
+                var handle = new VfsFileHandle(node, canRead, canWrite, flags.HasFlag(FileOpenFlags.Append));
+                return CurrentFileTable.Open(handle);
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        public int Close(int fd)
+        {
+            return CurrentFileTable.Close(fd) ? 0 : -1;
+        }
+
+        public int Read(int fd, Span<byte> buffer)
+        {
+            if (!TryGetHandle(fd, out var handle) || !handle.CanRead) return -1;
+            return handle.Read(buffer);
+        }
+
+        public int Write(int fd, ReadOnlySpan<byte> buffer)
+        {
+            if (!TryGetHandle(fd, out var handle) || !handle.CanWrite) return -1;
+            return handle.Write(buffer);
+        }
+
+        public int Seek(int fd, int offset, SeekOrigin origin)
+        {
+            if (!TryGetHandle(fd, out var handle)) return -1;
+            var result = handle.Seek(offset, origin);
+            return result < 0 ? -1 : (int)result;
+        }
+
+        public int OpenDirectory(string path)
+        {
+            try
+            {
+                var entries = _vfs.List(path, GetWorkingDirectory());
+                var handle = new VfsDirectoryHandle(entries);
+                return CurrentFileTable.Open(handle);
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        public bool ReadDirectoryEntry(int dirFd, out SysDirectoryEntry entry)
+        {
+            if (!TryGetHandle(dirFd, out var handle)) { entry = default; return false; }
+            return handle.TryReadDirectoryEntry(out entry);
+        }
+
+        public void RewindDirectory(int dirFd)
+        {
+            if (TryGetHandle(dirFd, out var handle))
+                handle.RewindDirectory();
+        }
 
         public void Print(string text) => GetStdOut().Write(text);
         public void PrintLine(string text = "") => GetStdOut().WriteLine(text);

@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 
 namespace MiniOS
@@ -9,6 +11,14 @@ namespace MiniOS
     /// </summary>
     public interface ISysApi
     {
+        int Open(string path, FileOpenFlags flags);
+        int Close(int fd);
+        int Read(int fd, Span<byte> buffer);
+        int Write(int fd, ReadOnlySpan<byte> buffer);
+        int Seek(int fd, int offset, SeekOrigin origin);
+        int OpenDirectory(string path);
+        bool ReadDirectoryEntry(int dirFd, out SysDirectoryEntry entry);
+        void RewindDirectory(int dirFd);
         void Print(string text);
         void PrintLine(string text = "");
         int ReadChar();

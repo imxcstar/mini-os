@@ -147,6 +147,23 @@ namespace MiniOS
             if (n is FileNode f) return f.Data;
             throw new InvalidOperationException("not a file");
         }
+
+        public FileNode OpenFile(string path, DirectoryNode? cwd = null, bool create = false, bool truncate = false)
+        {
+            var (dir, leaf) = ResolveParent(path, cwd);
+            if (!dir.Children.TryGetValue(leaf, out var node))
+            {
+                if (!create) throw new InvalidOperationException("No such file");
+                var file = new FileNode(leaf);
+                dir.Add(file);
+                node = file;
+            }
+            if (node is not FileNode fileNode)
+                throw new InvalidOperationException("Not a file");
+            if (truncate)
+                fileNode.Data = Array.Empty<byte>();
+            return fileNode;
+        }
         public IEnumerable<(string name, bool isDir, long size)> List(string path, DirectoryNode? cwd = null)
         {
             var n = Resolve(path, cwd);
