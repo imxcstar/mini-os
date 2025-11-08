@@ -10,23 +10,38 @@ namespace MiniOS
     {
         private const int SkipKey = int.MinValue;
         private const int EscapeTimeoutMs = 25;
+        private readonly ITerminalPlatform _platform;
         private readonly Queue<int> _pendingKeys = new();
         private bool _suppressNextLineFeed;
-        private bool _preferConsoleKeyInfo;
+        private bool _preferPlatformKeyInfo;
 
-        public Terminal()
+        public Terminal(ITerminalPlatform? platform = null)
         {
-            try { Console.TreatControlCAsInput = true; }
-            catch { }
-            _preferConsoleKeyInfo = DetectConsoleKeySupport();
+            _platform = platform ?? new ConsoleTerminalPlatform();
+            TryInitializePlatform();
+            _preferPlatformKeyInfo = DetectPlatformKeySupport();
         }
 
-        public virtual void Write(string s) => Console.Write(s);
-        public virtual void WriteLine(string s = "") => Console.WriteLine(s);
-        public virtual string? ReadLine() => Console.ReadLine();
+        protected ITerminalPlatform Platform => _platform;
+
+        private void TryInitializePlatform()
+        {
+            try { _platform.Initialize(); }
+            catch { }
+        }
+
+        private bool DetectPlatformKeySupport()
+        {
+            try { return _platform.SupportsKeyEvents; }
+            catch { return true; }
+        }
+
+        public virtual void Write(string s) => _platform.Write(s);
+        public virtual void WriteLine(string s = "") => _platform.WriteLine(s);
+        public virtual string? ReadLine() => _platform.ReadLine();
         public virtual int ReadChar()
         {
-            int c = Console.Read();
+            int c = _platform.ReadChar();
             return c < 0 ? -1 : c;
         }
 
@@ -35,79 +50,43 @@ namespace MiniOS
             if (_pendingKeys.Count > 0)
                 return NormalizeRawKey(_pendingKeys.Dequeue(), fromQueue: true);
 
-            if (_preferConsoleKeyInfo && TryReadConsoleKey(out var code))
+            if (_preferPlatformKeyInfo && TryReadPlatformKey(out var code))
                 return code;
 
             return ReadRawKey();
         }
 
-        public virtual void Clear() => Console.Clear();
-        public virtual void SetCursorPosition(int column, int row) => Console.SetCursorPosition(Math.Max(0, column), Math.Max(0, row));
-        public virtual int CursorColumn => Console.CursorLeft;
-        public virtual int CursorRow => Console.CursorTop;
-        public virtual int ConsoleWidth => Console.BufferWidth;
-        public virtual int ConsoleHeight => Console.BufferHeight;
-        public virtual void SetCursorVisible(bool visible)
-        {
-            try { Console.CursorVisible = visible; }
-            catch { }
-        }
+        public virtual void Clear() => _platform.Clear();
+        public virtual void SetCursorPosition(int column, int row) => _platform.SetCursorPosition(Math.Max(0, column), Math.Max(0, row));
+        public virtual int CursorColumn => _platform.CursorColumn;
+        public virtual int CursorRow => _platform.CursorRow;
+        public virtual int ConsoleWidth => _platform.ConsoleWidth;
+        public virtual int ConsoleHeight => _platform.ConsoleHeight;
+        public virtual void SetCursorVisible(bool visible) => _platform.SetCursorVisible(visible);
 
         public virtual void Prompt(string cwd) => Write($"{cwd} $ ");
 
-        private static bool DetectConsoleKeySupport()
-        {
-            try { return !Console.IsInputRedirected; }
-            catch { return true; }
-        }
-
-        private bool TryReadConsoleKey(out int code)
+        private bool TryReadPlatformKey(out int code)
         {
             try
             {
-                var key = Console.ReadKey(intercept: true);
-                code = EncodeConsoleKey(key);
-                return true;
+                if (_platform.TryReadKey(out code))
+                    return true;
             }
             catch
             {
-                _preferConsoleKeyInfo = false;
-                code = -1;
-                return false;
+                // swallow and disable fallthrough below
             }
-        }
-
-        private static int EncodeConsoleKey(ConsoleKeyInfo info)
-        {
-            switch (info.Key)
-            {
-                case ConsoleKey.UpArrow: return TerminalKeyCodes.ArrowUp;
-                case ConsoleKey.DownArrow: return TerminalKeyCodes.ArrowDown;
-                case ConsoleKey.LeftArrow: return TerminalKeyCodes.ArrowLeft;
-                case ConsoleKey.RightArrow: return TerminalKeyCodes.ArrowRight;
-                case ConsoleKey.Home: return TerminalKeyCodes.Home;
-                case ConsoleKey.End: return TerminalKeyCodes.End;
-                case ConsoleKey.PageUp: return TerminalKeyCodes.PageUp;
-                case ConsoleKey.PageDown: return TerminalKeyCodes.PageDown;
-                case ConsoleKey.Delete: return TerminalKeyCodes.Delete;
-                case ConsoleKey.Escape: return TerminalKeyCodes.Escape;
-                case ConsoleKey.Enter: return TerminalKeyCodes.Enter;
-                case ConsoleKey.Tab: return TerminalKeyCodes.Tab;
-                case ConsoleKey.Backspace: return TerminalKeyCodes.Backspace;
-            }
-
-            var ch = info.KeyChar;
-            if (ch == '\r' || ch == '\n') return TerminalKeyCodes.Enter;
-            if (ch == '\t') return TerminalKeyCodes.Tab;
-            if (ch == '\b' || ch == 127) return TerminalKeyCodes.Backspace;
-            return ch;
+            _preferPlatformKeyInfo = false;
+            code = -1;
+            return false;
         }
 
         private int ReadRawKey()
         {
             while (true)
             {
-                int value = Console.Read();
+                int value = _platform.ReadChar();
                 var normalized = NormalizeRawKey(value, fromQueue: false);
                 if (normalized == SkipKey)
                     continue;
@@ -224,7 +203,7 @@ namespace MiniOS
             {
                 if (KeyAvailableSafe())
                 {
-                    value = Console.Read();
+                    value = _platform.ReadChar();
                     return true;
                 }
                 if (sw.ElapsedMilliseconds >= EscapeTimeoutMs)
@@ -236,9 +215,9 @@ namespace MiniOS
             }
         }
 
-        private static bool KeyAvailableSafe()
+        private bool KeyAvailableSafe()
         {
-            try { return Console.KeyAvailable; }
+            try { return _platform.KeyAvailable; }
             catch { return false; }
         }
 

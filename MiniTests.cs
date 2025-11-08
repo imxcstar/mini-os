@@ -212,6 +212,24 @@ int main(void)
 
     private sealed class TestTerminal : Terminal
     {
+        private readonly TestTerminalPlatform _platform;
+
+        public TestTerminal()
+            : base(new TestTerminalPlatform())
+        {
+            _platform = (TestTerminalPlatform)Platform;
+        }
+
+        public void EnqueueInputs(params string[] lines) => _platform.EnqueueInputs(lines);
+        public void EnqueueKeySequence(string sequence) => _platform.EnqueueKeySequence(sequence);
+        public void EnqueueKeyCodes(params int[] codes) => _platform.EnqueueKeyCodes(codes);
+        public string Output => _platform.Output;
+
+        public override void Prompt(string cwd) => _platform.Prompt(cwd);
+    }
+
+    private sealed class TestTerminalPlatform : ITerminalPlatform
+    {
         private readonly Queue<string> _inputs = new();
         private readonly Queue<char> _charQueue = new();
         private readonly Queue<int> _keys = new();
@@ -222,70 +240,95 @@ int main(void)
         private readonly int _width = 80;
         private readonly int _height = 24;
 
+        public string Output => _output.ToString();
+
+        public void Initialize() { }
+
+        public void Write(string s) => _output.Append(s);
+
+        public void WriteLine(string s) => _output.AppendLine(s);
+
+        public string? ReadLine()
+        {
+            if (_inputs.Count == 0) return string.Empty;
+            return _inputs.Dequeue();
+        }
+
+        public int ReadChar()
+        {
+            if (_charQueue.Count == 0)
+            {
+                var line = ReadLine();
+                if (line is null) return -1;
+                foreach (var ch in (line + "\n"))
+                    _charQueue.Enqueue(ch);
+            }
+            return _charQueue.Count == 0 ? -1 : _charQueue.Dequeue();
+        }
+
+        public bool TryReadKey(out int keyCode)
+        {
+            if (_keys.Count > 0)
+            {
+                keyCode = _keys.Dequeue();
+                return true;
+            }
+
+            var ch = ReadChar();
+            if (ch < 0)
+            {
+                keyCode = -1;
+                return false;
+            }
+
+            keyCode = ch;
+            return true;
+        }
+
+        public bool SupportsKeyEvents => true;
+
+        public bool KeyAvailable => _charQueue.Count > 0 || _inputs.Count > 0 || _keys.Count > 0;
+
+        public void Clear()
+        {
+            _cursorCol = 0;
+            _cursorRow = 0;
+        }
+
+        public void SetCursorPosition(int column, int row)
+        {
+            _cursorCol = column;
+            _cursorRow = row;
+        }
+
+        public int CursorColumn => _cursorCol;
+        public int CursorRow => _cursorRow;
+        public int ConsoleWidth => _width;
+        public int ConsoleHeight => _height;
+
+        public void SetCursorVisible(bool visible) => _cursorVisible = visible;
+
         public void EnqueueInputs(params string[] lines)
         {
-            foreach (var line in lines) _inputs.Enqueue(line);
+            if (lines is null) return;
+            foreach (var line in lines)
+                _inputs.Enqueue(line);
         }
 
         public void EnqueueKeySequence(string sequence)
         {
+            if (sequence is null) return;
             foreach (var ch in sequence)
                 _keys.Enqueue(ch);
         }
 
         public void EnqueueKeyCodes(params int[] codes)
         {
+            if (codes is null) return;
             foreach (var code in codes)
                 _keys.Enqueue(code);
         }
 
-        public string Output => _output.ToString();
-
-        public override string? ReadLine()
-        {
-            if (_inputs.Count == 0) return string.Empty;
-            return _inputs.Dequeue();
-        }
-
-        public override int ReadChar()
-        {
-            if (_charQueue.Count == 0)
-            {
-                var line = ReadLine();
-                if (line is null) return -1;
-                var expanded = line + "\n";
-                foreach (var ch in expanded) _charQueue.Enqueue(ch);
-            }
-            return _charQueue.Count == 0 ? -1 : _charQueue.Dequeue();
-        }
-
-        public override int ReadKey()
-        {
-            if (_keys.Count == 0)
-                return ReadChar();
-            return _keys.Dequeue();
-        }
-
-        public override void Write(string s) => _output.Append(s);
-        public override void WriteLine(string s = "") => _output.AppendLine(s);
-        public override void Prompt(string cwd) => _output.Append($"[{cwd}]$ ");
-
-        public override void Clear()
-        {
-            _cursorCol = 0;
-            _cursorRow = 0;
-        }
-
-        public override void SetCursorPosition(int column, int row)
-        {
-            _cursorCol = column;
-            _cursorRow = row;
-        }
-
-        public override int CursorColumn => _cursorCol;
-        public override int CursorRow => _cursorRow;
-        public override int ConsoleWidth => _width;
-        public override int ConsoleHeight => _height;
-        public override void SetCursorVisible(bool visible) => _cursorVisible = visible;
+        public void Prompt(string cwd) => _output.Append($"[{cwd}]$ ");
     }
 }
