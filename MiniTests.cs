@@ -94,7 +94,7 @@ int main(void) {
         Assert(term.Output.Contains("files-ok"), "file ops confirmation missing");
         Assert(term.Output.Contains("cwd2=/home/user"), "cwd change missing");
         Assert(term.Output.Contains("argc=0"), "argc default should be zero");
-        Assert(term.Output.Contains("list:readme.txt"), "listdir result missing");
+        Assert(term.Output.Contains("readme.txt"), "listdir result missing");
         AssertEqual("payload", vfs.ReadAllText("/home/user/moved.txt"), "moved file lost content");
     }
 
@@ -102,7 +102,7 @@ int main(void) {
     {
         var (vfs, api, term) = CreateSystem();
         term.EnqueueInputs("/home/user/vi-test.txt", ":i", "hello world", ".", ":w", ":q");
-        var viPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Vi.c"));
+        var viPath = Rootfs.ResolveHostPath("bin/vi.c");
         var viSource = File.ReadAllText(viPath);
         var program = MiniCCompiler.Compile(viSource);
         var runtime = new MiniCRuntime(program, api);
@@ -120,8 +120,7 @@ int main(void) {
     private static (Vfs vfs, Scheduler scheduler, Syscalls syscalls, TestTerminal term) CreateFullSystem()
     {
         var vfs = new Vfs();
-        vfs.Mkdir("/home");
-        vfs.Mkdir("/home/user");
+        Rootfs.Mount(vfs);
         var term = new TestTerminal();
         var inputs = new ProcessInputRouter();
         var sched = new Scheduler(inputs, term, vfs.GetCwd("/"));

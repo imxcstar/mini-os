@@ -171,6 +171,34 @@ namespace MiniOS
             if (n is DirectoryNode d) return d;
             throw new InvalidOperationException("not a directory");
         }
+        public DirectoryNode EnsureDirectory(string path, DirectoryNode? cwd = null)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("path");
+            if (path == "/") return _root;
+            var isAbs = path.StartsWith("/");
+            var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            DirectoryNode cur = isAbs ? _root : (cwd ?? _root);
+            foreach (var part in parts)
+            {
+                if (part == ".") continue;
+                if (part == "..")
+                {
+                    cur = cur.Parent ?? _root;
+                    continue;
+                }
+                if (!cur.TryGet(part, out var n))
+                {
+                    var next = new DirectoryNode(part);
+                    cur.Add(next);
+                    cur = next;
+                    continue;
+                }
+                if (n is not DirectoryNode dir)
+                    throw new InvalidOperationException($"'{part}' is not a directory");
+                cur = dir;
+            }
+            return cur;
+        }
 
         private (DirectoryNode dir, string leaf) ResolveParent(string path, DirectoryNode? cwd = null)
         {
