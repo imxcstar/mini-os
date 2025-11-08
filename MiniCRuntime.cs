@@ -678,6 +678,7 @@ namespace MiniOS
             ["proc_pid"] = ProcPid,
             ["proc_name"] = ProcName,
             ["proc_state"] = ProcState,
+            ["proc_mem"] = ProcMemory,
             ["proc_kill"] = ProcKill,
             ["input"] = Input,
             ["rename"] = Rename,
@@ -1082,6 +1083,13 @@ namespace MiniOS
             if (args.Count != 1) throw new MiniCRuntimeException("proc_state expects index");
             var proc = ResolveProcess(ctx, args[0].AsInt());
             return MiniCValue.FromString(proc.State.ToString());
+        }
+
+        private static MiniCValue ProcMemory(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("proc_mem expects index");
+            var proc = ResolveProcess(ctx, args[0].AsInt());
+            return MiniCValue.FromInt(proc.MemoryBytes);
         }
 
         private static MiniCValue ProcKill(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)

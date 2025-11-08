@@ -28,7 +28,8 @@ namespace MiniOS
             {
                 var csrc = _vfs.ReadAllText(path);
                 var program = MiniCCompiler.Compile(csrc);
-                var runtime = new MiniCRuntime(program, _sys);
+                var memory = new MiniCMemory();
+                var runtime = new MiniCRuntime(program, _sys, memory);
                 var startOptions = new ProcessStartOptions
                 {
                     InputMode = options.InputMode == InputAttachMode.None ? InputAttachMode.Foreground : options.InputMode,
@@ -52,7 +53,7 @@ namespace MiniOS
                         _term.WriteLine($"[MiniC] fatal error: {ex.Message}");
                         return 1;
                     }
-                }, startOptions);
+                }, startOptions, memory);
                 return pid;
             }
             else

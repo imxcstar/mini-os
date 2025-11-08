@@ -14,6 +14,7 @@ namespace MiniOS
         private readonly SortedDictionary<int, int> _freeList = new();
         private readonly Dictionary<int, int> _allocations = new();
         private int _brk;
+        private int _allocatedBytes;
 
         public MiniCMemory(int capacity = 256 * 1024)
         {
@@ -22,6 +23,17 @@ namespace MiniOS
         }
 
         public int Capacity => _buffer.Length;
+
+        public int AllocatedBytes
+        {
+            get
+            {
+                lock (_buffer)
+                {
+                    return _allocatedBytes;
+                }
+            }
+        }
 
         public MiniCPointer Allocate(int size)
         {
@@ -36,12 +48,14 @@ namespace MiniOS
                     if (entry.Value > size)
                         _freeList[address + size] = entry.Value - size;
                     _allocations[address] = size;
+                    _allocatedBytes += size;
                     return new MiniCPointer(this, address);
                 }
                 if (_brk + size > _buffer.Length)
                     throw new MiniCRuntimeException("MiniC heap exhausted");
                 var ptr = new MiniCPointer(this, _brk);
                 _allocations[_brk] = size;
+                _allocatedBytes += size;
                 _brk += size;
                 return ptr;
             }
@@ -55,6 +69,7 @@ namespace MiniOS
                 if (!_allocations.TryGetValue(pointer.Address, out var size))
                     throw new MiniCRuntimeException("MiniC double free detected");
                 _allocations.Remove(pointer.Address);
+                _allocatedBytes -= size;
                 _freeList[pointer.Address] = size;
             }
         }

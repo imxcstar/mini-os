@@ -19,6 +19,7 @@ namespace MiniOS
         public Task<int>? Task { get; set; }
         public DateTime StartedAt { get; init; } = DateTime.UtcNow;
         public DateTime? EndedAt { get; set; }
+        public MiniCMemory? Memory { get; init; }
         public ProcessIoPipes Io { get; set; } = ProcessIoPipes.CreateNull();
         public DirectoryNode WorkingDirectory { get; set; } = null!;
         public IReadOnlyList<string> Arguments { get; init; } = Array.Empty<string>();
@@ -42,7 +43,7 @@ namespace MiniOS
 
         public IEnumerable<ProcessControlBlock> List() => _procs.Values.OrderBy(p => p.Pid);
 
-        public int Spawn(string name, Func<CancellationToken, Task<int>> entry, ProcessStartOptions? options = null)
+        public int Spawn(string name, Func<CancellationToken, Task<int>> entry, ProcessStartOptions? options = null, MiniCMemory? memory = null)
         {
             options ??= new ProcessStartOptions();
             var workingDirectory = options.WorkingDirectory ?? _defaultWorkingDirectory;
@@ -55,7 +56,8 @@ namespace MiniOS
                 Name = name,
                 State = ProcState.Ready,
                 WorkingDirectory = workingDirectory,
-                Arguments = args
+                Arguments = args,
+                Memory = memory
             };
             pcb.Io = options.IoPipes ?? ProcessIoPipes.CreateTerminalPipes(pcb, _terminal, _inputRouter, inputMode);
             pcb.FileTable = FileDescriptorTable.Create(pcb.Io);

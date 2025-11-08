@@ -143,7 +143,8 @@ namespace MiniOS
         {
             foreach (var proc in _sched.List())
             {
-                yield return new ProcessInfo(proc.Pid, proc.Name, proc.State);
+                var usedBytes = proc.Memory?.AllocatedBytes ?? 0;
+                yield return new ProcessInfo(proc.Pid, proc.Name, proc.State, usedBytes);
             }
         }
         public bool Kill(int pid) => _sched.Kill(pid);

@@ -46,6 +46,6 @@ namespace MiniOS
         void Sleep(int milliseconds, CancellationToken ct);
     }
 
-    public readonly record struct ProcessInfo(int Pid, string Name, ProcState State);
+    public readonly record struct ProcessInfo(int Pid, string Name, ProcState State, int MemoryBytes);
     public readonly record struct FsNodeInfo(bool Exists, bool IsDir, long Size);
 }
