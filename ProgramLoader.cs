@@ -1,6 +1,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace MiniOS
@@ -12,6 +14,8 @@ namespace MiniOS
         private readonly Terminal _term;
         private readonly ISysApi _sys;
         private readonly IMiniCIncludeResolver _includeResolver;
+        private readonly Dictionary<string, CachedProgram> _programCache = new(StringComparer.Ordinal);
+        private readonly object _cacheLock = new();
 
         public ProgramLoader(Vfs vfs, Scheduler sched, Terminal term, ISysApi sys)
         {
@@ -28,13 +32,7 @@ namespace MiniOS
             options ??= new ProcessStartOptions { InputMode = InputAttachMode.Foreground };
             if (path.EndsWith(".c", StringComparison.OrdinalIgnoreCase))
             {
-                var csrc = _vfs.ReadAllText(path);
-                var compileOptions = new MiniCCompilationOptions
-                {
-                    IncludeResolver = _includeResolver,
-                    SourcePath = path
-                };
-                var program = MiniCCompiler.Compile(csrc, compileOptions);
+                var program = GetOrCompileProgram(path);
                 var memory = new MiniCMemory();
                 var runtime = new MiniCRuntime(program, _sys, memory);
                 var startOptions = new ProcessStartOptions
@@ -80,5 +78,39 @@ namespace MiniOS
             }
             return new[] { path };
         }
+
+        private MiniCProgram GetOrCompileProgram(string path)
+        {
+            var csrc = _vfs.ReadAllText(path);
+            var hash = ComputeHash(csrc);
+            lock (_cacheLock)
+            {
+                if (_programCache.TryGetValue(path, out var cached) && cached.Hash == hash)
+                    return cached.Program;
+            }
+
+            var compileOptions = new MiniCCompilationOptions
+            {
+                IncludeResolver = _includeResolver,
+                SourcePath = path
+            };
+            var program = MiniCCompiler.Compile(csrc, compileOptions);
+
+            lock (_cacheLock)
+            {
+                _programCache[path] = new CachedProgram(hash, program);
+            }
+
+            return program;
+        }
+
+        private static string ComputeHash(string source)
+        {
+            var data = Encoding.UTF8.GetBytes(source);
+            var hash = SHA256.HashData(data);
+            return Convert.ToHexString(hash);
+        }
+
+        private sealed record CachedProgram(string Hash, MiniCProgram Program);
     }
 }
