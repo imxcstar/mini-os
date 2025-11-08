@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace MiniOS
 {
@@ -11,6 +12,7 @@ namespace MiniOS
         private const int SkipKey = int.MinValue;
         private const int EscapeTimeoutMs = 25;
         private readonly ITerminalPlatform _platform;
+        private readonly IAsyncTerminalPlatform? _asyncPlatform;
         private readonly Queue<int> _pendingKeys = new();
         private bool _suppressNextLineFeed;
         private bool _preferPlatformKeyInfo;
@@ -18,6 +20,7 @@ namespace MiniOS
         public Terminal(ITerminalPlatform? platform = null)
         {
             _platform = platform ?? new ConsoleTerminalPlatform();
+            _asyncPlatform = _platform as IAsyncTerminalPlatform;
             TryInitializePlatform();
             _preferPlatformKeyInfo = DetectPlatformKeySupport();
         }
@@ -38,11 +41,41 @@ namespace MiniOS
 
         public virtual void Write(string s) => _platform.Write(s);
         public virtual void WriteLine(string s = "") => _platform.WriteLine(s);
-        public virtual string? ReadLine() => _platform.ReadLine();
+        public virtual string? ReadLine()
+        {
+            if (_asyncPlatform is not null)
+            {
+                return _asyncPlatform.ReadLineAsync().GetAwaiter().GetResult();
+            }
+            return _platform.ReadLine();
+        }
+
+        public virtual Task<string?> ReadLineAsync(CancellationToken cancellationToken = default)
+        {
+            if (_asyncPlatform is not null)
+            {
+                return _asyncPlatform.ReadLineAsync(cancellationToken).AsTask();
+            }
+            return Task.FromResult(ReadLine());
+        }
+
         public virtual int ReadChar()
         {
+            if (_asyncPlatform is not null)
+            {
+                return _asyncPlatform.ReadCharAsync().GetAwaiter().GetResult();
+            }
             int c = _platform.ReadChar();
             return c < 0 ? -1 : c;
+        }
+
+        public virtual Task<int> ReadCharAsync(CancellationToken cancellationToken = default)
+        {
+            if (_asyncPlatform is not null)
+            {
+                return _asyncPlatform.ReadCharAsync(cancellationToken).AsTask();
+            }
+            return Task.FromResult(ReadChar());
         }
 
         public virtual int ReadKey()
@@ -86,7 +119,7 @@ namespace MiniOS
         {
             while (true)
             {
-                int value = _platform.ReadChar();
+                int value = ReadChar();
                 var normalized = NormalizeRawKey(value, fromQueue: false);
                 if (normalized == SkipKey)
                     continue;
@@ -203,7 +236,7 @@ namespace MiniOS
             {
                 if (KeyAvailableSafe())
                 {
-                    value = _platform.ReadChar();
+                    value = ReadChar();
                     return true;
                 }
                 if (sw.ElapsedMilliseconds >= EscapeTimeoutMs)

@@ -28,7 +28,7 @@ namespace MiniOS
             while (true)
             {
                 _term.Prompt(_cwd.Path);
-                var line = _term.ReadLine();
+                var line = await _term.ReadLineAsync().ConfigureAwait(false);
                 if (line is null) break;
                 line = line.Trim();
                 if (string.IsNullOrEmpty(line)) continue;

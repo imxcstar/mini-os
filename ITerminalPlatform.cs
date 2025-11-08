@@ -1,3 +1,6 @@
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace MiniOS
 {
     public interface ITerminalPlatform
@@ -17,5 +20,11 @@ namespace MiniOS
         int ConsoleWidth { get; }
         int ConsoleHeight { get; }
         void SetCursorVisible(bool visible);
+    }
+
+    public interface IAsyncTerminalPlatform
+    {
+        ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default);
+        ValueTask<int> ReadCharAsync(CancellationToken cancellationToken = default);
     }
 }

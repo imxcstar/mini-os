@@ -1,0 +1,95 @@
+@page "/terminal"
+
+@implements IDisposable
+
+@inject MiniOsTerminalHost TerminalHost
+@inject IJSRuntime JsRuntime
+
+<PageTitle>MiniOS Terminal</PageTitle>
+
+<h1>MiniOS Web Terminal</h1>
+<p class="terminal-hint">Focus the input box, type a command, and press Enter to interact with the in-browser MiniOS shell.</p>
+
+<div class="terminal-shell">
+    <pre class="terminal-output" @ref="_outputRef">@_terminalText</pre>
+    <input class="terminal-input"
+           @bind="_currentLine"
+           @bind:event="oninput"
+           @onkeydown="HandleInputKey"
+           @ref="_inputRef"
+           autocomplete="off"
+           spellcheck="false" />
+</div>
+
+@code {
+    private string _terminalText = string.Empty;
+    private string _currentLine = string.Empty;
+    private ElementReference _outputRef;
+    private ElementReference _inputRef;
+    private bool _pendingScroll;
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        TerminalHost.OutputChanged += HandleOutputChanged;
+        TerminalHost.EnsureStarted();
+        _terminalText = TerminalHost.GetBufferSnapshot();
+        _pendingScroll = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await FocusInputAsync();
+        }
+
+        if (_pendingScroll)
+        {
+            _pendingScroll = false;
+            await JsRuntime.InvokeVoidAsync("miniOsTerminal.scrollToBottom", _outputRef);
+        }
+    }
+
+    private async Task HandleInputKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            var line = _currentLine;
+            _currentLine = string.Empty;
+            TerminalHost.SubmitLine(line);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void HandleOutputChanged()
+    {
+        if (_disposed) return;
+        _ = InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            _terminalText = TerminalHost.GetBufferSnapshot();
+            _pendingScroll = true;
+            StateHasChanged();
+        });
+    }
+
+    private async Task FocusInputAsync()
+    {
+        try
+        {
+            await _inputRef.FocusAsync();
+        }
+        catch
+        {
+            // Input might not be ready yet; ignore.
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        TerminalHost.OutputChanged -= HandleOutputChanged;
+    }
+}
