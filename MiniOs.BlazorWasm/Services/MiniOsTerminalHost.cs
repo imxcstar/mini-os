@@ -19,6 +19,13 @@ namespace MiniOs.BlazorWasm.Services
 
         public bool IsRunning => _kernelTask != null && !_kernelTask.IsCompleted;
 
+        private HttpClient _httpClient;
+
+        public MiniOsTerminalHost(HttpClient httpClient)
+        {
+            _httpClient = httpClient;
+        }
+
         public void EnsureStarted()
         {
             lock (_sync)
@@ -33,7 +40,7 @@ namespace MiniOs.BlazorWasm.Services
                 {
                     try
                     {
-                        await Kernel.BootAsync().ConfigureAwait(false);
+                        await Kernel.BootAsync(_httpClient).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {

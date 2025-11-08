@@ -13,12 +13,12 @@ namespace MiniOS
         public static Syscalls Sys { get; private set; } = BuildSyscalls();
         public static ProgramLoader Loader { get; private set; } = BuildProgramLoader();
 
-        public static async Task BootAsync()
+        public static async Task BootAsync(HttpClient? httpClient = null)
         {
             Terminal.WriteLine("MiniOS");
             Terminal.WriteLine("Type `help` for commands.\n");
 
-            Rootfs.Mount(Vfs);
+            await Rootfs.MountAsync(Vfs, httpClient);
 
             var shell = new Shell(Vfs, Scheduler, Terminal, Loader, InputRouter);
             await shell.RunAsync();

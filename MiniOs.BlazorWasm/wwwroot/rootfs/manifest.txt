@@ -1,0 +1,16 @@
+bin/cat.c
+bin/cp.c
+bin/echo.c
+bin/kill.c
+bin/ls.c
+bin/mkdir.c
+bin/mv.c
+bin/ps.c
+bin/pwd.c
+bin/rm.c
+bin/sleep.c
+bin/touch.c
+bin/vi.c
+bin/write.c
+home/user/readme.txt
+include/stdio.h
