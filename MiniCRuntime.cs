@@ -584,6 +584,11 @@ namespace MiniOS
             ["putchar"] = PutChar,
             ["getchar"] = GetChar,
             ["printf"] = Printf,
+            ["cwd"] = Cwd,
+            ["chdir"] = Chdir,
+            ["listdir"] = ListDir,
+            ["mkdir"] = Mkdir,
+            ["remove"] = Remove,
             ["sleep_ms"] = Sleep,
             ["clock_ms"] = Clock,
             ["readall"] = ReadAll,
@@ -595,6 +600,10 @@ namespace MiniOS
             ["rename"] = Rename,
             ["copy"] = Copy,
             ["move"] = Move,
+            ["ps"] = Processes,
+            ["killproc"] = KillProc,
+            ["argc"] = ArgCount,
+            ["argv"] = ArgValue,
             ["strlen"] = StrLen,
             ["strchar"] = StrChar,
             ["substr"] = SubStr,
@@ -668,6 +677,19 @@ namespace MiniOS
             return MiniCValue.FromInt(sb.Length);
         }
 
+        private static MiniCValue Cwd(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("cwd expects no args");
+            return MiniCValue.FromString(ctx.Sys.GetCwd());
+        }
+
+        private static MiniCValue Chdir(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("chdir expects path");
+            ctx.Sys.SetCwd(args[0].AsString());
+            return MiniCValue.FromInt(0);
+        }
+
         private static MiniCValue Sleep(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
         {
             if (args.Count != 1) throw new MiniCRuntimeException("sleep_ms expects 1 argument");
@@ -693,6 +715,34 @@ namespace MiniOS
         {
             if (args.Count != 2) throw new MiniCRuntimeException("writeall expects path + text");
             ctx.Sys.WriteAllText(args[0].AsString(), args[1].AsString());
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue ListDir(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count > 1) throw new MiniCRuntimeException("listdir expects optional path");
+            var path = args.Count == 1 ? args[0].AsString() : ".";
+            var entries = ctx.Sys.ListEntries(path);
+            var sb = new StringBuilder();
+            foreach (var (name, isDir, size) in entries)
+            {
+                if (isDir) sb.Append(name).Append("/\n");
+                else sb.Append(name).Append('\t').Append(size).Append('\n');
+            }
+            return MiniCValue.FromString(sb.ToString());
+        }
+
+        private static MiniCValue Mkdir(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("mkdir expects path");
+            ctx.Sys.Mkdir(args[0].AsString());
+            return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue Remove(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("remove expects path");
+            ctx.Sys.Remove(args[0].AsString());
             return MiniCValue.FromInt(0);
         }
 
@@ -742,6 +792,37 @@ namespace MiniOS
             if (args.Count != 2) throw new MiniCRuntimeException("move expects source and destination");
             ctx.Sys.Move(args[0].AsString(), args[1].AsString());
             return MiniCValue.FromInt(0);
+        }
+
+        private static MiniCValue Processes(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("ps expects no args");
+            var sb = new StringBuilder();
+            foreach (var proc in ctx.Sys.ListProcesses())
+            {
+                sb.Append(proc.Pid).Append('\t').Append(proc.State).Append('\t').Append(proc.Name).Append('\n');
+            }
+            return MiniCValue.FromString(sb.ToString());
+        }
+
+        private static MiniCValue KillProc(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("killproc expects pid");
+            var success = ctx.Sys.Kill(args[0].AsInt());
+            return MiniCValue.FromInt(success ? 0 : -1);
+        }
+
+        private static MiniCValue ArgCount(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 0) throw new MiniCRuntimeException("argc expects no args");
+            return MiniCValue.FromInt(ctx.Sys.ArgumentCount());
+        }
+
+        private static MiniCValue ArgValue(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)
+        {
+            if (args.Count != 1) throw new MiniCRuntimeException("argv expects index");
+            var index = args[0].AsInt();
+            return MiniCValue.FromString(ctx.Sys.GetArgument(index));
         }
 
         private static MiniCValue StrLen(MiniCEvalContext ctx, IReadOnlyList<MiniCValue> args)

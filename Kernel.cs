@@ -7,9 +7,10 @@ namespace MiniOS
 {
     public static class Kernel
     {
-        public static readonly Scheduler Scheduler = new Scheduler();
+        public static readonly ProcessInputRouter InputRouter = new ProcessInputRouter();
         public static readonly Vfs Vfs = new Vfs();
         public static readonly Terminal Terminal = new Terminal();
+        public static readonly Scheduler Scheduler = new Scheduler(InputRouter, Terminal, Vfs.GetCwd("/"));
         public static readonly Syscalls Sys = new Syscalls(Vfs, Scheduler, Terminal);
         public static readonly ProgramLoader Loader = new ProgramLoader(Vfs, Scheduler, Terminal, Sys);
 
@@ -21,7 +22,7 @@ namespace MiniOS
             Vfs.Mkdir("/bin");
             Vfs.Mkdir("/home");
             Vfs.Mkdir("/home/user");
-            Vfs.WriteAllText("/home/user/readme.txt", "Welcome to MiniOS. Try 'run /home/user/hello.c'.");
+            Vfs.WriteAllText("/home/user/readme.txt", "Welcome to MiniOS. Try '/home/user/hello.c'.");
 
             // Seed a feature-rich MiniC hello
             Vfs.WriteAllText("/home/user/hello.c", @"#include <stdio.h>
@@ -36,17 +37,23 @@ int main(void) {
     return 0;
 }");
 
-            // Load the vi editor into /bin and the user home if available
-            var viPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Vi.c"));
-            if (File.Exists(viPath))
-            {
-                var viSource = File.ReadAllText(viPath);
-                Vfs.WriteAllText("/bin/vi.c", viSource);
-                Vfs.WriteAllText("/home/user/vi.c", viSource);
-            }
+            SeedSystemCommands();
 
-            var shell = new Shell(Vfs, Scheduler, Terminal, Loader);
+            var shell = new Shell(Vfs, Scheduler, Terminal, Loader, InputRouter);
             await shell.RunAsync();
+        }
+
+        private static void SeedSystemCommands()
+        {
+            var commandsDir = Path.Combine(AppContext.BaseDirectory, "SystemCommands");
+            if (!Directory.Exists(commandsDir)) return;
+            var files = Directory.GetFiles(commandsDir, "*.c", SearchOption.TopDirectoryOnly);
+            foreach (var file in files)
+            {
+                var name = Path.GetFileName(file);
+                var contents = File.ReadAllText(file);
+                Vfs.WriteAllText($"/bin/{name}", contents);
+            }
         }
     }
 }

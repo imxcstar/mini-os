@@ -14,6 +14,8 @@ namespace MiniOS
         int ReadChar();
         string ReadLine();
         string Input(string prompt = "");
+        string GetCwd();
+        void SetCwd(string path);
         string ReadAllText(string path);
         byte[] ReadAllBytes(string path);
         void WriteAllText(string path, string text);
@@ -25,9 +27,15 @@ namespace MiniOS
         void Rename(string path, string newName);
         void Copy(string source, string destination);
         void Move(string source, string destination);
+        IEnumerable<ProcessInfo> ListProcesses();
+        bool Kill(int pid);
         int Spawn(string path);
         int Wait(int pid);
+        int ArgumentCount();
+        string GetArgument(int index);
         uint TimeMilliseconds();
         void Sleep(int milliseconds, CancellationToken ct);
     }
+
+    public readonly record struct ProcessInfo(int Pid, string Name, ProcState State);
 }

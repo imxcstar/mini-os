@@ -1,5 +1,6 @@
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -11,12 +12,13 @@ namespace MiniOS
         private readonly Scheduler _sched;
         private readonly Terminal _term;
         private readonly ProgramLoader _loader;
+        private readonly ProcessInputRouter _inputs;
 
         private DirectoryNode _cwd;
 
-        public Shell(Vfs vfs, Scheduler sched, Terminal term, ProgramLoader loader)
+        public Shell(Vfs vfs, Scheduler sched, Terminal term, ProgramLoader loader, ProcessInputRouter inputs)
         {
-            _vfs = vfs; _sched = sched; _term = term; _loader = loader;
+            _vfs = vfs; _sched = sched; _term = term; _loader = loader; _inputs = inputs;
             _cwd = vfs.GetCwd("/home/user");
             Kernel.Sys.AttachRunner(_loader);
         }
@@ -34,32 +36,15 @@ namespace MiniOS
                 if (bg) line = line[..^1].TrimEnd();
 
                 var parts = SplitArgs(line).ToArray();
-                var cmd = parts.First();
+                if (parts.Length == 0) continue;
+                var cmd = parts[0];
                 var args = parts.Skip(1).ToArray();
 
                 try
                 {
                     if (cmd == "exit") return;
                     if (HandleBuiltin(cmd, args, bg)) continue;
-
-                    if (cmd == "run")
-                    {
-                        if (args.Length == 0) { _term.WriteLine("run <path>"); continue; }
-                        var path = Resolve(args[0]);
-                        var pid = _loader.SpawnByPath(path);
-                        if (!bg) await _sched.WaitAsync(pid);
-                        continue;
-                    }
-                    if (cmd == "compile")
-                    {
-                        if (args.Length < 1) { _term.WriteLine("compile <in.c>"); continue; }
-                        var inPath = Resolve(args[0]);
-                        var csrc = _vfs.ReadAllText(inPath);
-                        MiniCCompiler.Compile(csrc);
-                        _term.WriteLine("MiniC compilation succeeded");
-                        continue;
-                    }
-
+                    if (await TryLaunchExternalAsync(cmd, args, bg)) continue;
                     _term.WriteLine($"Unknown command: {cmd}");
                 }
                 catch (Exception ex)
@@ -74,71 +59,98 @@ namespace MiniOS
             switch (cmd)
             {
                 case "help":
-                    _term.WriteLine("Builtins: pwd, cd, ls, cat, echo, write, touch, mkdir, rm, mv, cp, rename, ps, kill, sleep, run, compile, exit");
-                    _term.WriteLine("Run C .c programs inside the virtual system.");
+                    _term.WriteLine("Builtins: cd, fg, compile, exit");
+                    _term.WriteLine("System commands live in /bin (pwd, ls, cat, echo, touch, mkdir, rm, mv, cp, ps, kill, sleep, write). Run any .c file directly.");
                     return true;
-                case "pwd":
-                    _term.WriteLine(_cwd.Path); return true;
                 case "cd":
                     _cwd = _vfs.GetCwd(args.Length == 0 ? "/" : Resolve(args[0])); return true;
-                case "ls":
+                case "compile":
                     {
-                        var p = args.Length == 0 ? "." : args[0];
-                        foreach (var (name, isDir, size) in _vfs.List(Resolve(p)))
-                            _term.WriteLine(isDir ? $"{name}/" : $"{name}\t{size}");
+                        if (args.Length < 1) { _term.WriteLine("compile <in.c>"); return true; }
+                        var inPath = Resolve(args[0]);
+                        var csrc = _vfs.ReadAllText(inPath);
+                        MiniCCompiler.Compile(csrc);
+                        _term.WriteLine("MiniC compilation succeeded");
                         return true;
                     }
-                case "cat":
+                case "fg":
                     {
-                        if (args.Length == 0) { _term.WriteLine("cat <path>"); return true; }
-                        _term.WriteLine(_vfs.ReadAllText(Resolve(args[0])));
-                        return true;
-                    }
-                case "echo":
-                    _term.WriteLine(string.Join(" ", args)); return true;
-                case "write":
-                    {
-                        if (args.Length < 2) { _term.WriteLine("write <path> <text>"); return true; }
-                        var path = Resolve(args[0]);
-                        var text = string.Join(" ", args.Skip(1));
-                        _vfs.WriteAllText(path, text); return true;
-                    }
-                case "touch":
-                    if (args.Length == 0) { _term.WriteLine("touch <path>"); return true; }
-                    _vfs.Touch(Resolve(args[0])); return true;
-                case "mkdir":
-                    if (args.Length == 0) { _term.WriteLine("mkdir <path>"); return true; }
-                    _vfs.Mkdir(Resolve(args[0])); return true;
-                case "rm":
-                    if (args.Length == 0) { _term.WriteLine("rm <path>"); return true; }
-                    _vfs.Remove(Resolve(args[0])); return true;
-                case "mv":
-                    if (args.Length < 2) { _term.WriteLine("mv <source> <destination>"); return true; }
-                    _vfs.Move(Resolve(args[0]), Resolve(args[1])); return true;
-                case "cp":
-                    if (args.Length < 2) { _term.WriteLine("cp <source> <destination>"); return true; }
-                    _vfs.Copy(Resolve(args[0]), Resolve(args[1])); return true;
-                case "rename":
-                    if (args.Length < 2) { _term.WriteLine("rename <path> <new-name>"); return true; }
-                    _vfs.Rename(Resolve(args[0]), args[1]); return true;
-                case "ps":
-                    foreach (var p in _sched.List()) _term.WriteLine($"{p.Pid}\t{p.State}\t{p.Name}");
-                    return true;
-                case "kill":
-                    if (args.Length == 0 || !int.TryParse(args[0], out var pid)) { _term.WriteLine("kill <pid>"); return true; }
-                    if (!_sched.Kill(pid)) _term.WriteLine("no such pid"); return true;
-                case "sleep":
-                    {
-                        var sec = 1; if (args.Length>0 && int.TryParse(args[0], out var s)) sec = s;
-                        var pid2 = _sched.Spawn("sleep", async ct => { await Task.Delay(TimeSpan.FromSeconds(sec), ct); return 0; });
-                        if (!bg) _sched.WaitAsync(pid2).GetAwaiter().GetResult();
+                        if (args.Length == 0 || !int.TryParse(args[0], out var fgPid))
+                        {
+                            _term.WriteLine("fg <pid>");
+                            return true;
+                        }
+                        if (!_sched.List().Any(p => p.Pid == fgPid))
+                        {
+                            _term.WriteLine("no such pid");
+                            return true;
+                        }
+                        if (!_inputs.BringToForeground(fgPid))
+                        {
+                            _term.WriteLine("pid is not attached to the terminal");
+                            return true;
+                        }
+                        _term.WriteLine($"[fg] attached to {fgPid}");
+                        _sched.WaitAsync(fgPid).GetAwaiter().GetResult();
                         return true;
                     }
             }
             return false;
         }
 
-        private static System.Collections.Generic.IEnumerable<string> SplitArgs(string s)
+        private async Task<bool> TryLaunchExternalAsync(string cmd, string[] args, bool background)
+        {
+            var path = ResolveProgramPath(cmd);
+            if (path is null) return false;
+            var start = new ProcessStartOptions
+            {
+                InputMode = background ? InputAttachMode.Background : InputAttachMode.Foreground,
+                WorkingDirectory = _cwd,
+                Arguments = BuildArgumentVector(cmd, args)
+            };
+            var pid = _loader.SpawnByPath(path, start);
+            if (background)
+            {
+                _term.WriteLine($"[{pid}] background (fg {pid} to attach)");
+            }
+            else
+            {
+                await _sched.WaitAsync(pid);
+            }
+            return true;
+        }
+
+        private static IReadOnlyList<string> BuildArgumentVector(string cmd, string[] args)
+        {
+            var list = new string[args.Length + 1];
+            list[0] = cmd;
+            Array.Copy(args, 0, list, 1, args.Length);
+            return list;
+        }
+
+        private string? ResolveProgramPath(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command)) return null;
+            if (command.Contains('/'))
+            {
+                var path = Resolve(command);
+                return _vfs.Exists(path) ? path : null;
+            }
+            var candidates = new[]
+            {
+                Resolve(command),
+                Resolve(command + ".c"),
+                "/bin/" + command,
+                "/bin/" + command + ".c"
+            };
+            foreach (var candidate in candidates)
+            {
+                if (_vfs.Exists(candidate)) return candidate;
+            }
+            return null;
+        }
+
+        private static IEnumerable<string> SplitArgs(string s)
         {
             bool inQuote=false; var cur=new System.Text.StringBuilder();
             foreach (var ch in s)

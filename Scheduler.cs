@@ -19,21 +19,50 @@ namespace MiniOS
         public Task<int>? Task { get; set; }
         public DateTime StartedAt { get; init; } = DateTime.UtcNow;
         public DateTime? EndedAt { get; set; }
+        public ProcessIoPipes Io { get; set; } = ProcessIoPipes.CreateNull();
+        public DirectoryNode WorkingDirectory { get; set; } = null!;
+        public IReadOnlyList<string> Arguments { get; init; } = Array.Empty<string>();
     }
 
     public class Scheduler
     {
         private readonly ConcurrentDictionary<int, ProcessControlBlock> _procs = new();
+        private readonly ProcessInputRouter _inputRouter;
+        private readonly Terminal _terminal;
+        private readonly DirectoryNode _defaultWorkingDirectory;
         private int _nextPid = 100;
+
+        public Scheduler(ProcessInputRouter inputRouter, Terminal terminal, DirectoryNode defaultWorkingDirectory)
+        {
+            _inputRouter = inputRouter;
+            _terminal = terminal;
+            _defaultWorkingDirectory = defaultWorkingDirectory;
+        }
 
         public IEnumerable<ProcessControlBlock> List() => _procs.Values.OrderBy(p => p.Pid);
 
-        public int Spawn(string name, Func<CancellationToken, Task<int>> entry)
+        public int Spawn(string name, Func<CancellationToken, Task<int>> entry, ProcessStartOptions? options = null)
         {
+            options ??= new ProcessStartOptions();
+            var workingDirectory = options.WorkingDirectory ?? _defaultWorkingDirectory;
+            var args = options.Arguments?.ToArray() ?? Array.Empty<string>();
+            var inputMode = options.InputMode;
             var pid = Interlocked.Increment(ref _nextPid);
-            var pcb = new ProcessControlBlock { Pid = pid, Name = name, State = ProcState.Ready };
+            var pcb = new ProcessControlBlock
+            {
+                Pid = pid,
+                Name = name,
+                State = ProcState.Ready,
+                WorkingDirectory = workingDirectory,
+                Arguments = args
+            };
+            pcb.Io = options.IoPipes ?? ProcessIoPipes.CreateTerminalPipes(pcb, _terminal, _inputRouter, inputMode);
+            _procs[pid] = pcb;
+            _inputRouter.Register(pid, inputMode);
             pcb.Task = Task.Run(async () =>
             {
+                var previous = ProcessContext.Current;
+                ProcessContext.Current = pcb;
                 pcb.State = ProcState.Running;
                 try
                 {
@@ -57,9 +86,10 @@ namespace MiniOS
                 finally
                 {
                     _procs.TryRemove(pid, out _);
+                    _inputRouter.Unregister(pid);
+                    ProcessContext.Current = previous;
                 }
             });
-            _procs[pid] = pcb;
             return pid;
         }
 

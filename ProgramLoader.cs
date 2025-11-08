@@ -1,5 +1,6 @@
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace MiniOS
@@ -16,17 +17,25 @@ namespace MiniOS
             _vfs = vfs; _sched = sched; _term = term; _sys = sys;
         }
 
-        public int SpawnProgram(string path) => SpawnByPath(path);
+        public int SpawnProgram(string path, ProcessStartOptions? options = null) => SpawnByPath(path, options);
 
         public async Task<int> WaitAsync(int pid) => await _sched.WaitAsync(pid);
 
-        public int SpawnByPath(string path)
+        public int SpawnByPath(string path, ProcessStartOptions? options = null)
         {
+            options ??= new ProcessStartOptions { InputMode = InputAttachMode.Foreground };
             if (path.EndsWith(".c", StringComparison.OrdinalIgnoreCase))
             {
                 var csrc = _vfs.ReadAllText(path);
                 var program = MiniCCompiler.Compile(csrc);
                 var runtime = new MiniCRuntime(program, _sys);
+                var startOptions = new ProcessStartOptions
+                {
+                    InputMode = options.InputMode == InputAttachMode.None ? InputAttachMode.Foreground : options.InputMode,
+                    WorkingDirectory = options.WorkingDirectory,
+                    Arguments = NormalizeArguments(path, options.Arguments),
+                    IoPipes = options.IoPipes
+                };
                 var pid = _sched.Spawn($"c:{path}", async ct =>
                 {
                     try
@@ -43,13 +52,25 @@ namespace MiniOS
                         _term.WriteLine($"[MiniC] fatal error: {ex.Message}");
                         return 1;
                     }
-                });
+                }, startOptions);
                 return pid;
             }
             else
             {
                 throw new InvalidOperationException("unknown program type");
             }
+        }
+
+        private static IReadOnlyList<string> NormalizeArguments(string path, IReadOnlyList<string>? args)
+        {
+            if (args is { Count: > 0 })
+            {
+                var copy = new string[args.Count];
+                for (int i = 0; i < args.Count; i++)
+                    copy[i] = args[i];
+                return copy;
+            }
+            return new[] { path };
         }
     }
 }

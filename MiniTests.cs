@@ -66,6 +66,12 @@ int main(void) {
     lines[1] = ""beta"";
     lines[2] = strcat(lines[0], lines[1]);
     printf(""len=%d char=%d\n"", strlen(lines[2]), strchar(""xyz"", 1));
+    printf(""cwd=%s\n"", cwd());
+    chdir(""/home/user"");
+    printf(""cwd2=%s\n"", cwd());
+    printf(""argc=%d\n"", argc());
+    char* listing = listdir(""."");
+    printf(""list:%s"", listing);
     char* slice = substr(""hello"", 1, 3);
     printf(""slice=%s\n"", slice);
     char* who = input(""name?"");
@@ -86,6 +92,9 @@ int main(void) {
         Assert(term.Output.Contains("slice=ell"), "substr result missing");
         Assert(term.Output.Contains("hi Tester"), "input result missing");
         Assert(term.Output.Contains("files-ok"), "file ops confirmation missing");
+        Assert(term.Output.Contains("cwd2=/home/user"), "cwd change missing");
+        Assert(term.Output.Contains("argc=0"), "argc default should be zero");
+        Assert(term.Output.Contains("list:readme.txt"), "listdir result missing");
         AssertEqual("payload", vfs.ReadAllText("/home/user/moved.txt"), "moved file lost content");
     }
 
@@ -104,13 +113,20 @@ int main(void) {
 
     private static (Vfs vfs, ISysApi api, TestTerminal term) CreateSystem()
     {
+        var (vfs, _, syscalls, term) = CreateFullSystem();
+        return (vfs, syscalls, term);
+    }
+
+    private static (Vfs vfs, Scheduler scheduler, Syscalls syscalls, TestTerminal term) CreateFullSystem()
+    {
         var vfs = new Vfs();
         vfs.Mkdir("/home");
         vfs.Mkdir("/home/user");
         var term = new TestTerminal();
-        var sched = new Scheduler();
+        var inputs = new ProcessInputRouter();
+        var sched = new Scheduler(inputs, term, vfs.GetCwd("/"));
         var syscalls = new Syscalls(vfs, sched, term);
-        return (vfs, syscalls, term);
+        return (vfs, sched, syscalls, term);
     }
 
     private static void Assert(bool condition, string message)
