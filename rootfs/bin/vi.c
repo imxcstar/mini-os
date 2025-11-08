@@ -463,6 +463,26 @@ void adjust_viewport()
     if (viewport_left < 0) viewport_left = 0;
 }
 
+void print_line_number(int number)
+{
+    if (number < 10)
+    {
+        printf("   %d", number);
+        return;
+    }
+    if (number < 100)
+    {
+        printf("  %d", number);
+        return;
+    }
+    if (number < 1000)
+    {
+        printf(" %d", number);
+        return;
+    }
+    printf("%d", number);
+}
+
 void draw_body_line(int row, int line_index)
 {
     console_set_cursor(0, row);
@@ -474,7 +494,9 @@ void draw_body_line(int row, int line_index)
     char marker = ' ';
     if (line_index == cursor_line) marker = '>';
     char* visible = substr(lines[line_index], viewport_left, content_width);
-    printf("%c%4d %s", marker, line_index + 1, visible);
+    printf("%c", marker);
+    print_line_number(line_index + 1);
+    printf(" %s", visible);
 }
 
 void render()
@@ -674,6 +696,46 @@ void handle_insert_key(int key)
     if (key == KEY_ESCAPE)
     {
         exit_insert_mode();
+        return;
+    }
+    if (key == KEY_LEFT)
+    {
+        move_left();
+        return;
+    }
+    if (key == KEY_RIGHT)
+    {
+        move_right();
+        return;
+    }
+    if (key == KEY_UP)
+    {
+        move_up();
+        return;
+    }
+    if (key == KEY_DOWN)
+    {
+        move_down();
+        return;
+    }
+    if (key == KEY_HOME)
+    {
+        move_home();
+        return;
+    }
+    if (key == KEY_END)
+    {
+        move_end();
+        return;
+    }
+    if (key == KEY_PAGEUP)
+    {
+        page_up();
+        return;
+    }
+    if (key == KEY_PAGEDOWN)
+    {
+        page_down();
         return;
     }
     if (key == KEY_ENTER)
