@@ -22,20 +22,6 @@ namespace MiniOS
             Vfs.Mkdir("/bin");
             Vfs.Mkdir("/home");
             Vfs.Mkdir("/home/user");
-            Vfs.WriteAllText("/home/user/readme.txt", "Welcome to MiniOS. Try '/home/user/hello.c'.");
-
-            // Seed a feature-rich MiniC hello
-            Vfs.WriteAllText("/home/user/hello.c", @"#include <stdio.h>
-
-int main(void) {
-    printf(""MiniC runtime demo\n"");
-    char buffer[32] = ""Hello from MiniC!"";
-    puts(buffer);
-    for (int i = 0; i < 5; ++i) {
-        printf(""i=%d\n"", i);
-    }
-    return 0;
-}");
 
             SeedSystemCommands();
 
