@@ -137,7 +137,7 @@ namespace MiniOS
 
         public static IMiniCIncludeResolver Host => _hostResolver.Value;
 
-        public static IMiniCIncludeResolver ForVfs(Vfs vfs, params string[] systemIncludeDirs) =>
+        public static IMiniCIncludeResolver ForVfs(IVirtualFileSystem vfs, params string[] systemIncludeDirs) =>
             new VfsIncludeResolver(vfs, systemIncludeDirs);
 
         private sealed class HostIncludeResolver : IMiniCIncludeResolver
@@ -202,10 +202,10 @@ namespace MiniOS
 
         private sealed class VfsIncludeResolver : IMiniCIncludeResolver
         {
-            private readonly Vfs _vfs;
+            private readonly IVirtualFileSystem _vfs;
             private readonly string[] _systemIncludeDirs;
 
-            public VfsIncludeResolver(Vfs vfs, params string[]? includeDirs)
+            public VfsIncludeResolver(IVirtualFileSystem vfs, params string[]? includeDirs)
             {
                 _vfs = vfs;
                 _systemIncludeDirs = (includeDirs is { Length: > 0 } ? includeDirs : new[] { "/include", "/usr/include" })

@@ -52,7 +52,7 @@ namespace MiniOS
         }
     }
 
-    public class Vfs
+    public class Vfs : IVirtualFileSystem
     {
         private readonly DirectoryNode _root = new DirectoryNode("/");
         public DirectoryNode Root => _root;

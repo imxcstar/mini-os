@@ -10,7 +10,7 @@ namespace MiniOS
     {
         private const string EmbeddedResourcePrefix = "rootfs/";
 
-        public static async Task MountAsync(Vfs vfs, HttpClient? httpClient = null)
+        public static async Task MountAsync(IVirtualFileSystem vfs, HttpClient? httpClient = null)
         {
             if (vfs is null) throw new ArgumentNullException(nameof(vfs));
 
@@ -32,7 +32,7 @@ namespace MiniOS
             throw new InvalidOperationException("rootfs not found (neither host, embedded, nor wasm http).");
         }
 
-        private static async Task<bool> TryMountFromHttpAsync(Vfs vfs, HttpClient httpClient)
+        private static async Task<bool> TryMountFromHttpAsync(IVirtualFileSystem vfs, HttpClient httpClient)
         {
             try
             {
@@ -75,7 +75,7 @@ namespace MiniOS
             }
         }
 
-        private static bool TryMountFromHost(Vfs vfs)
+        private static bool TryMountFromHost(IVirtualFileSystem vfs)
         {
             try
             {
@@ -89,7 +89,7 @@ namespace MiniOS
             }
         }
 
-        private static bool TryMountFromEmbedded(Vfs vfs)
+        private static bool TryMountFromEmbedded(IVirtualFileSystem vfs)
         {
             var assembly = typeof(Rootfs).Assembly;
             var resources = assembly.GetManifestResourceNames()
@@ -129,7 +129,7 @@ namespace MiniOS
             return true;
         }
 
-        public static void Populate(Vfs vfs, string hostRoot)
+        public static void Populate(IVirtualFileSystem vfs, string hostRoot)
         {
             if (!Directory.Exists(hostRoot))
                 throw new InvalidOperationException($"rootfs '{hostRoot}' does not exist");

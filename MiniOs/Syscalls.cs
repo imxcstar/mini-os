@@ -13,10 +13,10 @@ namespace MiniOS
         Task<int> WaitAsync(int pid);
     }
 
-    public class Syscalls : ISysApi
+    public class Syscalls : ISysApi, ISystemApiHost
     {
-        private readonly Vfs _vfs;
-        private readonly Scheduler _sched;
+        private readonly IVirtualFileSystem _vfs;
+        private readonly IProcessScheduler _sched;
         private readonly Terminal _term;
         private readonly DirectoryNode _rootDir;
         private DirectoryNode _hostWorkingDirectory;
@@ -25,7 +25,7 @@ namespace MiniOS
         private readonly FileDescriptorTable _hostFileTable;
         private IProgramRunner? _runner;
 
-        public Syscalls(Vfs vfs, Scheduler sched, Terminal term)
+        public Syscalls(IVirtualFileSystem vfs, IProcessScheduler sched, Terminal term)
         {
             _vfs = vfs;
             _sched = sched;

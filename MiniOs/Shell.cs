@@ -8,19 +8,18 @@ namespace MiniOS
 {
     public class Shell
     {
-        private readonly Vfs _vfs;
-        private readonly Scheduler _sched;
+        private readonly IVirtualFileSystem _vfs;
+        private readonly IProcessScheduler _sched;
         private readonly Terminal _term;
-        private readonly ProgramLoader _loader;
+        private readonly IProgramLoader _loader;
         private readonly ProcessInputRouter _inputs;
 
         private DirectoryNode _cwd;
 
-        public Shell(Vfs vfs, Scheduler sched, Terminal term, ProgramLoader loader, ProcessInputRouter inputs)
+        public Shell(IVirtualFileSystem vfs, IProcessScheduler sched, Terminal term, IProgramLoader loader, ProcessInputRouter inputs)
         {
             _vfs = vfs; _sched = sched; _term = term; _loader = loader; _inputs = inputs;
             _cwd = vfs.GetCwd("/home/user");
-            Kernel.Sys.AttachRunner(_loader);
         }
 
         public async Task RunAsync()

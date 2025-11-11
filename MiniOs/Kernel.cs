@@ -1,45 +1,46 @@
 
 using System;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace MiniOS
 {
     public static class Kernel
     {
-        public static readonly ProcessInputRouter InputRouter = new ProcessInputRouter();
-        public static readonly Vfs Vfs = new Vfs();
-        public static Terminal Terminal { get; private set; } = new Terminal();
-        public static Scheduler Scheduler { get; private set; } = BuildScheduler();
-        public static Syscalls Sys { get; private set; } = BuildSyscalls();
-        public static ProgramLoader Loader { get; private set; } = BuildProgramLoader();
+        private static readonly object _sync = new();
+        private static readonly MiniOsKernelBuilder _builder = new();
+        private static IMiniOsKernel? _kernel;
 
-        public static async Task BootAsync(HttpClient? httpClient = null)
+        public static IMiniOsKernel Instance => EnsureKernel();
+        public static KernelServices Services => Instance.Services;
+
+        public static Task BootAsync(HttpClient? httpClient = null, CancellationToken cancellationToken = default)
+            => Instance.BootAsync(httpClient, cancellationToken);
+
+        public static void Configure(Action<MiniOsKernelBuilder> configure)
         {
-            Terminal.WriteLine("MiniOS");
-            Terminal.WriteLine("Type `help` for commands.\n");
-
-            await Rootfs.MountAsync(Vfs, httpClient);
-
-            var shell = new Shell(Vfs, Scheduler, Terminal, Loader, InputRouter);
-            await shell.RunAsync();
+            if (configure is null) throw new ArgumentNullException(nameof(configure));
+            lock (_sync)
+            {
+                configure(_builder);
+                _kernel = _builder.Build();
+            }
         }
 
         public static void UseTerminalPlatform(ITerminalPlatform platform)
         {
             if (platform is null) throw new ArgumentNullException(nameof(platform));
-            Terminal = new Terminal(platform);
-            RefreshCoreServices();
+            Configure(builder => builder.UseTerminal(() => new Terminal(platform)));
         }
 
-        private static void RefreshCoreServices()
+        private static IMiniOsKernel EnsureKernel()
         {
-            Scheduler = BuildScheduler();
-            Sys = BuildSyscalls();
-            Loader = BuildProgramLoader();
+            lock (_sync)
+            {
+                _kernel ??= _builder.Build();
+                return _kernel;
+            }
         }
-
-        private static Scheduler BuildScheduler() => new Scheduler(InputRouter, Terminal, Vfs.GetCwd("/"));
-        private static Syscalls BuildSyscalls() => new Syscalls(Vfs, Scheduler, Terminal);
-        private static ProgramLoader BuildProgramLoader() => new ProgramLoader(Vfs, Scheduler, Terminal, Sys);
     }
 }

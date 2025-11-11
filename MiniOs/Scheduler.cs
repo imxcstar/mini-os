@@ -26,7 +26,7 @@ namespace MiniOS
         public FileDescriptorTable FileTable { get; set; } = null!;
     }
 
-    public class Scheduler
+    public class Scheduler : IProcessScheduler
     {
         private readonly ConcurrentDictionary<int, ProcessControlBlock> _procs = new();
         private readonly ProcessInputRouter _inputRouter;

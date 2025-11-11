@@ -7,17 +7,17 @@ using System.Threading.Tasks;
 
 namespace MiniOS
 {
-    public class ProgramLoader : IProgramRunner
+    public class ProgramLoader : IProgramLoader
     {
-        private readonly Vfs _vfs;
-        private readonly Scheduler _sched;
+        private readonly IVirtualFileSystem _vfs;
+        private readonly IProcessScheduler _sched;
         private readonly Terminal _term;
         private readonly ISysApi _sys;
         private readonly IMiniCIncludeResolver _includeResolver;
         private readonly Dictionary<string, CachedProgram> _programCache = new(StringComparer.Ordinal);
         private readonly object _cacheLock = new();
 
-        public ProgramLoader(Vfs vfs, Scheduler sched, Terminal term, ISysApi sys)
+        public ProgramLoader(IVirtualFileSystem vfs, IProcessScheduler sched, Terminal term, ISysApi sys)
         {
             _vfs = vfs; _sched = sched; _term = term; _sys = sys;
             _includeResolver = MiniCIncludeResolver.ForVfs(vfs);
