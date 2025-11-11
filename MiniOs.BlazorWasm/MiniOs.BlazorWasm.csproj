@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\MiniOs.csproj" />
+    <ProjectReference Include="../MiniOs/MiniOs.csproj" />
   </ItemGroup>
 
 </Project>
