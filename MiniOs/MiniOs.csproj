@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net9.0</TargetFramework>
@@ -6,20 +7,12 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Remove="MiniOs.ConsoleHost\**\*" />
-    <Compile Remove="MiniOs.BlazorWasm\**\*" />
-    <None Remove="MiniOs.ConsoleHost\**\*" />
-    <None Remove="MiniOs.BlazorWasm\**\*" />
-    <EmbeddedResource Remove="MiniOs.ConsoleHost\**\*" />
-    <EmbeddedResource Remove="MiniOs.BlazorWasm\**\*" />
-    <Content Remove="MiniOs.ConsoleHost\**\*" />
-    <Content Remove="MiniOs.BlazorWasm\**\*" />
-  </ItemGroup>
+  
   <ItemGroup>
     <Content Include="rootfs\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
+  
 </Project>
